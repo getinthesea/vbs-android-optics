@@ -1,5 +1,7 @@
 // Streams VBS's own window to the phone, from a background thread inside the plugin.
-//   Desktop Duplication on the GPU that shows VBS -> crop + scale + BGRA->NV12 on that GPU ->
+//   Windows Graphics Capture of the VBS window (works whichever GPU VBS renders on, e.g. a laptop's NVIDIA
+//   with the screen on Intel, where Desktop Duplication refuses) -> crop to the client area + scale +
+//   BGRA->NV12 on the GPU that shows VBS ->
 //   its hardware H.264 encoder (no B-frames) -> UDP packets (protocol.h) to the phone.
 // The plugin tells it where the phone is, which pose the view is aimed with and the field of view.
 #include <winsock2.h>
@@ -13,6 +15,12 @@
 #include <mferror.h>
 #include <strmif.h>
 #include <wrl/client.h>
+#include <dwmapi.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <Windows.Graphics.Capture.Interop.h>
+#include <windows.graphics.directx.direct3d11.interop.h>
 #include <initguid.h>
 #include <codecapi.h>
 #include <atomic>
@@ -30,6 +38,10 @@
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "windowsapp.lib")
+
+namespace wgc = winrt::Windows::Graphics::Capture;
 
 using Microsoft::WRL::ComPtr;
 
@@ -383,9 +395,31 @@ static bool run_session(const Options& opt, SOCKET sock)
     ComPtr<ID3D10Multithread> mt;
     if (SUCCEEDED(device.As(&mt))) mt->SetMultithreadProtected(TRUE);
 
-    ComPtr<IDXGIOutputDuplication> dupl;
-    hr = output->DuplicateOutput(device.Get(), &dupl);
-    if (FAILED(hr)) { log("Desktop duplication failed 0x%08X", hr); return false; }
+    // Windows Graphics Capture of the VBS window, delivered into our device
+    wgc::GraphicsCaptureItem item{ nullptr };
+    wgc::Direct3D11CaptureFramePool pool{ nullptr };
+    wgc::GraphicsCaptureSession session{ nullptr };
+    winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice wdevice{ nullptr };
+    try {
+        auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+        winrt::check_hresult(interop->CreateForWindow(vbs, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(item)));
+        ComPtr<IDXGIDevice> dxgi_device;
+        device.As(&dxgi_device);
+        winrt::com_ptr<::IInspectable> inspectable;
+        winrt::check_hresult(CreateDirect3D11DeviceFromDXGIDevice(dxgi_device.Get(), inspectable.put()));
+        wdevice = inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
+        pool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(wdevice,
+            winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, item.Size());
+        session = pool.CreateCaptureSession(item);
+        try { session.IsCursorCaptureEnabled(false); } catch (...) {}
+        try { session.IsBorderRequired(false); } catch (...) {} // Windows 11: no yellow border round VBS
+        session.StartCapture();
+    }
+    catch (winrt::hresult_error const& e) {
+        log("Window capture failed 0x%08X", (unsigned)e.code());
+        return false;
+    }
+    auto capture_size = item.Size();
 
     // Stream size: opt.height tall, VBS's shape, multiple of 16
     UINT out_h = opt.height;
@@ -487,20 +521,21 @@ static bool run_session(const Options& opt, SOCKET sock)
             from_len = sizeof(from);
         }
 
-        DXGI_OUTDUPL_FRAME_INFO info;
-        ComPtr<IDXGIResource> res;
-        hr = dupl->AcquireNextFrame(50, &info, &res);
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) continue;
-        if (hr == DXGI_ERROR_ACCESS_LOST) { log("Desktop duplication lost, restarting"); return true; }
-        if (FAILED(hr)) { log("AcquireNextFrame failed 0x%08X", hr); return false; }
-        if (info.LastPresentTime.QuadPart == 0) { dupl->ReleaseFrame(); continue; } // Only the mouse moved
-        if (now_ms() - last_capture < 1000.0 / opt.fps - 2) { dupl->ReleaseFrame(); continue; } // Hold to the stream rate
+        wgc::Direct3D11CaptureFrame frame{ nullptr };
+        try { frame = pool.TryGetNextFrame(); } catch (...) { log("Window capture stopped"); return true; }
+        if (!frame) { Sleep(1); continue; }
+        if (now_ms() - last_capture < 1000.0 / opt.fps - 2) { frame.Close(); continue; } // Hold to the stream rate
         last_capture = now_ms();
+        auto size = frame.ContentSize();
+        if (size.Width != capture_size.Width || size.Height != capture_size.Height) {
+            capture_size = size;
+            pool.Recreate(wdevice, winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size);
+        }
 
         uint32_t ip = want_ip;
         uint32_t pose_seq = want_seq;
         float tan_x = want_tan_x;
-        if (!ip) { dupl->ReleaseFrame(); log("phone gone, stopped streaming"); return false; }
+        if (!ip) { frame.Close(); log("phone gone, stopped streaming"); return false; }
         if (ip != last_ip) {
             char text[32];
             inet_ntop(AF_INET, &ip, text, sizeof(text));
@@ -509,17 +544,21 @@ static bool run_session(const Options& opt, SOCKET sock)
             force_key = true;
         }
 
-        // Copy the VBS client area out of the desktop image
-        ComPtr<ID3D11Texture2D> desktop;
-        res.As(&desktop);
+        // Copy the client area out of the window image (which includes the title bar and borders)
+        ComPtr<ID3D11Texture2D> window_image;
+        auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+        access->GetInterface(IID_PPV_ARGS(&window_image));
+        RECT bounds{};
+        DwmGetWindowAttribute(vbs, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds));
         D3D11_BOX box;
-        box.left = max(0L, src.left - out_desc.DesktopCoordinates.left);
-        box.top = max(0L, src.top - out_desc.DesktopCoordinates.top);
-        box.right = (UINT)min((LONG)(out_desc.DesktopCoordinates.right - out_desc.DesktopCoordinates.left), (LONG)box.left + src_w);
-        box.bottom = (UINT)min((LONG)(out_desc.DesktopCoordinates.bottom - out_desc.DesktopCoordinates.top), (LONG)box.top + src_h);
+        box.left = (UINT)max(0L, src.left - bounds.left);
+        box.top = (UINT)max(0L, src.top - bounds.top);
+        box.right = (UINT)min((LONG)size.Width, (LONG)box.left + src_w);
+        box.bottom = (UINT)min((LONG)size.Height, (LONG)box.top + src_h);
         box.front = 0; box.back = 1;
-        context->CopySubresourceRegion(bgra.Get(), 0, 0, 0, 0, desktop.Get(), 0, &box);
-        dupl->ReleaseFrame();
+        if (box.right > box.left && box.bottom > box.top)
+            context->CopySubresourceRegion(bgra.Get(), 0, 0, 0, 0, window_image.Get(), 0, &box);
+        frame.Close();
 
         D3D11_VIDEO_PROCESSOR_STREAM stream{};
         stream.Enable = TRUE;
