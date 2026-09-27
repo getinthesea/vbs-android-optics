@@ -1,0 +1,6 @@
+LIBRARY     "VBSAndroidOptics"
+
+EXPORTS
+   RegisterCommandFnc		@1
+   OnSimulationStep			@2
+   PluginFunction			@3

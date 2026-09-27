@@ -1,0 +1,359 @@
+package nz.vbs.androidoptics
+
+import android.Manifest
+import android.app.Activity
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.opengl.GLES11Ext
+import android.opengl.GLES20
+import android.opengl.GLSurfaceView
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.google.ar.core.ArCoreApk
+import com.google.ar.core.CameraConfig
+import com.google.ar.core.CameraConfigFilter
+import com.google.ar.core.Config
+import com.google.ar.core.Session
+import com.google.ar.core.TrackingState
+import java.util.EnumSet
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
+
+/**
+ * VBS Android Optics: sends this phone's ARCore orientation to VBSAndroidOptics.dll, which aims the VBS view
+ * with it and streams the view back. Hold the phone like a camera (landscape, screen towards you).
+ */
+class MainActivity : Activity(), GLSurfaceView.Renderer {
+
+    private lateinit var glView: GLSurfaceView
+    private lateinit var statusText: TextView
+    private lateinit var hostField: EditText
+    private val ui = Handler(Looper.getMainLooper())
+    private val prefs by lazy { getSharedPreferences("tracker", MODE_PRIVATE) }
+
+    @Volatile private var session: Session? = null
+    private var installRequested = false
+    @Volatile private var link: PoseLink? = null
+
+    // GL thread state
+    private val background = CameraBackground()
+    private var video: VideoView? = null
+    @Volatile private var videoStream: VideoStream? = null
+    // Lag correction: gyro orientation at each pose sent, to re-aim video frames by how far the phone has turned since
+    private val gyro by lazy { GyroTracker(this) }
+    private val axes = AxisMatcher()
+    private val poseGyro = HashMap<Int, FloatArray>()
+    @Volatile private var lagFix = true
+
+    // Zoom presets: name and horizontal field of view in degrees. The plugin sets VBS's view to match.
+    private val ZOOMS = listOf("1x" to 60f, "NVG" to 40f, "4x" to 15f, "7x binos" to 7.6f, "10x" to 5.5f, "15x" to 3.7f)
+    @Volatile private var zoom = 3
+    private lateinit var crosshair: CrosshairView
+    private var textureSetFor: Session? = null
+    private var displayChanged = false
+    private var viewWidth = 0
+    private var viewHeight = 0
+    private var lastTimestamp = 0L
+    private var seq = 0
+
+    @Volatile private var calibrate = 0
+    @Volatile private var trackingText = "starting"
+    @Volatile private var cameraFps = 30
+    @Volatile private var frames = 0
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // "adb shell am start -n nz.vbs.androidoptics/.MainActivity --es host <PC IP or usb>" sets the link from a script
+        intent.getStringExtra("host")?.let { prefs.edit().putString("host", it).apply() }
+        zoom = prefs.getInt("zoom", 3).coerceIn(0, ZOOMS.size - 1)
+
+        glView = GLSurfaceView(this).apply {
+            preserveEGLContextOnPause = true
+            setEGLContextClientVersion(2)
+            setRenderer(this@MainActivity)
+            renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        }
+
+        statusText = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setShadowLayer(6f, 0f, 0f, Color.BLACK) // Readable over the camera image
+        }
+        hostField = EditText(this).apply {
+            setText(prefs.getString("host", PoseLink.USB))
+            hint = "PC IP address, or usb"
+            setTextColor(Color.BLACK)
+            setHintTextColor(Color.DKGRAY)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            isSingleLine = true
+            minEms = 9
+            setOnEditorActionListener { _, _, _ -> applyHost(); false }
+        }
+        val connectButton = Button(this).apply {
+            text = "Connect"
+            setOnClickListener { applyHost() }
+        }
+        val calibrateButton = Button(this).apply {
+            text = "Calibrate"
+            textSize = 20f
+            setOnClickListener { calibrate = (calibrate + 1) and 0xFF }
+        }
+        val zoomButton = Button(this).apply {
+            text = "Zoom: ${ZOOMS[zoom].first}"
+            setOnClickListener {
+                zoom = (zoom + 1) % ZOOMS.size
+                prefs.edit().putInt("zoom", zoom).apply()
+                text = "Zoom: ${ZOOMS[zoom].first}"
+            }
+        }
+        val lagFixButton = Button(this).apply {
+            text = "Lag fix: on"
+            setOnClickListener {
+                lagFix = !lagFix
+                text = if (lagFix) "Lag fix: on" else "Lag fix: off"
+            }
+        }
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(hostField)
+            addView(connectButton)
+            addView(calibrateButton)
+            addView(zoomButton)
+            addView(lagFixButton)
+        }
+        val overlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 24, 32, 24)
+            addView(statusText)
+            addView(controls)
+        }
+        crosshair = CrosshairView(this).apply { visibility = View.GONE }
+        setContentView(FrameLayout(this).apply {
+            addView(glView)
+            addView(crosshair)
+            addView(overlay)
+        })
+        ui.post(object : Runnable {
+            override fun run() {
+                updateStatus()
+                ui.postDelayed(this, 250)
+            }
+        })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemUi()
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), 0)
+            return
+        }
+        if (session == null) {
+            try {
+                if (ArCoreApk.getInstance().requestInstall(this, !installRequested) == ArCoreApk.InstallStatus.INSTALL_REQUESTED) {
+                    installRequested = true
+                    return
+                }
+                session = Session(this).also { configure(it) }
+            } catch (e: Exception) {
+                trackingText = "ARCore unavailable: ${e.message}"
+                return
+            }
+        }
+        try {
+            session?.resume()
+        } catch (e: Exception) {
+            trackingText = "Camera unavailable: ${e.message}"
+            session = null
+            return
+        }
+        glView.onResume()
+        gyro.start()
+        startLink()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        glView.onPause()
+        gyro.stop()
+        session?.pause()
+        link?.close()
+        link = null
+        videoStream?.close()
+        videoStream = null
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        session?.close()
+        session = null
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
+            trackingText = "Camera permission is needed for tracking"
+        }
+    }
+
+    private fun configure(s: Session) {
+        // 60 fps camera gives 60 poses a second where the phone supports it
+        val fast = s.getSupportedCameraConfigs(
+            CameraConfigFilter(s).setTargetFps(EnumSet.of(CameraConfig.TargetFps.TARGET_FPS_60)))
+        if (fast.isNotEmpty()) {
+            s.cameraConfig = fast[0]
+            cameraFps = 60
+        }
+        s.configure(Config(s).apply {
+            planeFindingMode = Config.PlaneFindingMode.DISABLED
+            lightEstimationMode = Config.LightEstimationMode.DISABLED
+            depthMode = Config.DepthMode.DISABLED
+            updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+        })
+    }
+
+    private fun applyHost() {
+        prefs.edit().putString("host", hostField.text.toString().trim().ifEmpty { PoseLink.USB }).apply()
+        startLink()
+        hideSystemUi()
+    }
+
+    private fun startLink() {
+        link?.close()
+        link = PoseLink(prefs.getString("host", PoseLink.USB) ?: PoseLink.USB)
+    }
+
+    private var lastFrames = 0
+    private var lastRateCheck = System.currentTimeMillis()
+    private var poseRate = 0
+
+    private fun updateStatus() {
+        val now = System.currentTimeMillis()
+        if (now - lastRateCheck >= 1000) {
+            poseRate = ((frames - lastFrames) * 1000 / (now - lastRateCheck)).toInt()
+            lastFrames = frames
+            lastRateCheck = now
+        }
+        val l = link
+        val linkText = when {
+            l == null -> "not connected"
+            l.error != null -> l.error
+            l.lastAckMs == 0L -> "${l.host}: sent ${l.sent.get()}, no reply from PC yet"
+            now - l.lastAckMs > 1000 -> "${l.host}: PC NOT RECEIVING (last reply ${(now - l.lastAckMs) / 1000} s ago)"
+            else -> "${l.host}: PC receiving (${l.pcReceived} poses)"
+        }
+        val v = videoStream
+        val videoText = when {
+            v == null -> "Video: off"
+            v.error != null -> v.error
+            v.framesDecoded == 0 -> "Video: waiting for VBS (video needs Wi-Fi, not usb)"
+            else -> "Video: ${v.videoWidth}x${v.videoHeight}, ${v.framesDecoded} frames, ${v.framesDropped} dropped, " +
+                "${v.keyRequests} key requests, receive-to-screen %.1f ms".format(v.decodeMsAvg) +
+                (if (!gyro.available) ", no gyro" else if (!axes.settled) ", lag fix learning axes (move the phone)" else "")
+        }
+        crosshair.visibility = if (v != null && v.framesDecoded > 0 && System.nanoTime() - v.lastFrameNs < 1_000_000_000L) View.VISIBLE else View.GONE
+        statusText.text = "ARCore: $trackingText  ($poseRate poses/s, camera ${cameraFps} fps)\n$linkText\n$videoText"
+    }
+
+    @Suppress("DEPRECATION")
+    private fun hideSystemUi() {
+        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+    }
+
+    // ---- GL thread ----
+
+    override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        background.create()
+        textureSetFor = null
+        videoStream?.close()
+        videoStream = null
+        video = VideoView().apply { create() }
+    }
+
+    override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        GLES20.glViewport(0, 0, width, height)
+        viewWidth = width
+        viewHeight = height
+        displayChanged = true
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onDrawFrame(gl: GL10?) {
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        val s = session ?: return
+        if (textureSetFor !== s) {
+            s.setCameraTextureName(background.texture)
+            textureSetFor = s
+            displayChanged = true
+        }
+        if (displayChanged) {
+            s.setDisplayGeometry(windowManager.defaultDisplay.rotation, viewWidth, viewHeight)
+            displayChanged = false
+        }
+        val v = video
+        if (videoStream == null && v != null) {
+            videoStream = try { VideoStream(v.surface) } catch (e: Exception) { null }
+        }
+        val frame = try { s.update() } catch (e: Exception) { return }
+
+        // Show the VBS video while it is arriving, otherwise the camera
+        val stream = videoStream
+        v?.update()
+        if (v != null && stream != null && System.nanoTime() - stream.lastFrameNs < 1_000_000_000L) {
+            val info = stream.frameInfo[v.frameNumber]
+            var tanX = info?.frustum?.get(0) ?: 0f
+            var tanY = info?.frustum?.get(1) ?: 0f
+            if (tanX <= 0f || tanY <= 0f) { // Not in the frame header: use the zoom we asked for
+                tanX = Math.tan(Math.toRadians(ZOOMS[zoom].second / 2.0)).toFloat()
+                tanY = tanX * stream.videoHeight / stream.videoWidth.coerceAtLeast(1)
+            }
+            v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, tanX, tanY,
+                if (lagFix) lagCorrection(info?.poseSeq) else Rot.IDENTITY)
+        } else {
+            background.draw(frame)
+        }
+        if (frame.timestamp == lastTimestamp) return // No new camera frame yet
+        lastTimestamp = frame.timestamp
+
+        val camera = frame.camera
+        val tracking = camera.trackingState == TrackingState.TRACKING
+        trackingText = if (tracking) "tracking"
+            else "not tracking (${camera.trackingFailureReason}) - move the phone side to side to start"
+        // Display-oriented: X right, Y up, looking along -Z; world Y up with gravity
+        val q = camera.displayOrientedPose.rotationQuaternion
+        gyro.at(frame.timestamp)?.let { g ->
+            poseGyro[seq] = g
+            if (tracking) axes.add(Rot.fromQuat(q), g)
+            if (poseGyro.size > 300) poseGyro.keys.filter { it < seq - 200 }.forEach { poseGyro.remove(it) }
+        }
+        link?.send(seq++, frame.timestamp, q, tracking, calibrate, ZOOMS[zoom].second)
+        frames++
+    }
+
+    /** Rotation (column-major, for the shader) from the current view to the view a frame was drawn with */
+    private fun lagCorrection(poseSeq: Int?): FloatArray {
+        val then = poseSeq?.let { poseGyro[it] } ?: return Rot.IDENTITY
+        val now = gyro.latest() ?: return Rot.IDENTITY
+        val a = Rot.quarterTurnsZ(axes.quarterTurns)                // device axes -> display axes
+        val turn = Rot.mul(Rot.transpose(then), now)                // now -> then, in device axes
+        val inDisplay = Rot.mul(Rot.mul(a, turn), Rot.transpose(a))
+        return Rot.transpose(inDisplay)
+    }
+}
