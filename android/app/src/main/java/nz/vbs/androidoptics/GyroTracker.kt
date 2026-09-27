@@ -5,6 +5,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.HandlerThread
 import kotlin.math.abs
 import kotlin.math.acos
 import kotlin.math.cos
@@ -59,8 +61,22 @@ class GyroTracker(context: Context) : SensorEventListener {
     private val history = ArrayDeque<Sample>()
     private val lock = Any()
 
-    fun start() { sensor?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) } }
-    fun stop() = sensors.unregisterListener(this)
+    // 100 Hz on our own thread. At SENSOR_DELAY_FASTEST on the main thread, ARCore's own IMU feed was starved
+    // ("IMU buffer is empty", a few samples a second) and it never started tracking.
+    private var thread: HandlerThread? = null
+
+    fun start() {
+        val s = sensor ?: return
+        val t = HandlerThread("GyroTracker").apply { start() }
+        thread = t
+        sensors.registerListener(this, s, 10_000, Handler(t.looper))
+    }
+
+    fun stop() {
+        sensors.unregisterListener(this)
+        thread?.quitSafely()
+        thread = null
+    }
 
     override fun onSensorChanged(e: SensorEvent) {
         val r = FloatArray(9)

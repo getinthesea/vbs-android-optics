@@ -183,7 +183,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             return
         }
         glView.onResume()
-        gyro.start()
+        if (!intent.getBooleanExtra("nogyro", false)) gyro.start() // --ez nogyro true: diagnostics
         startLink()
     }
 
