@@ -31,8 +31,10 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
 /**
- * VBS Android Optics: sends this phone's ARCore orientation to VBSAndroidOptics.dll, which aims the VBS view
- * with it and streams the view back. Hold the phone like a camera (landscape, screen towards you).
+ * VBS Android Optics: sends this phone's orientation to VBSAndroidOptics.dll, which aims the VBS view with it
+ * and streams the view back. Hold the phone like a camera (landscape, screen towards you).
+ * Tracking comes from the gyro (instant, fast, heading drifts slowly: re-zero with Calibrate) or ARCore
+ * (camera + motion, no drift once tracking, needs sideways movement and detail to start).
  */
 class MainActivity : Activity(), GLSurfaceView.Renderer {
 
@@ -53,8 +55,12 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     // Lag correction: gyro orientation at each pose sent, to re-aim video frames by how far the phone has turned since
     private val gyro by lazy { GyroTracker(this) }
     private val axes = AxisMatcher()
-    private val poseGyro = HashMap<Int, FloatArray>()
+    private val poseGyro = java.util.concurrent.ConcurrentHashMap<Int, FloatArray>()
+    private val poseSentNs = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+    @Volatile private var gyroMode = true   // Tracking source: gyro, or ARCore when false
+    @Volatile private var displayTurns = 1  // Screen rotation in quarter turns (device axes -> display axes)
     @Volatile private var lagFix = true
+    @Volatile private var videoOn = true // Off: stop receiving/decoding and show the camera (what ARCore sees)
 
     // Zoom presets: name and horizontal field of view in degrees. The plugin sets VBS's view to match.
     private val ZOOMS = listOf("1x" to 60f, "NVG" to 40f, "4x" to 15f, "7x binos" to 7.6f, "10x" to 5.5f, "15x" to 3.7f)
@@ -65,7 +71,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     private var viewWidth = 0
     private var viewHeight = 0
     private var lastTimestamp = 0L
-    private var seq = 0
+    @Volatile private var seq = 0
 
     @Volatile private var calibrate = 0
     @Volatile private var trackingText = "starting"
@@ -78,6 +84,8 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         // "adb shell am start -n nz.vbs.androidoptics/.MainActivity --es host <PC IP or usb>" sets the link from a script
         intent.getStringExtra("host")?.let { prefs.edit().putString("host", it).apply() }
         zoom = prefs.getInt("zoom", 3).coerceIn(0, ZOOMS.size - 1)
+        if (intent.getBooleanExtra("novideo", false)) videoOn = false // --ez novideo true: diagnostics
+        gyroMode = prefs.getBoolean("gyroMode", true)
 
         glView = GLSurfaceView(this).apply {
             preserveEGLContextOnPause = true
@@ -127,13 +135,29 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
                 text = if (lagFix) "Lag fix: on" else "Lag fix: off"
             }
         }
+        val videoButton = Button(this).apply {
+            text = "Video: on"
+            setOnClickListener {
+                videoOn = !videoOn
+                text = if (videoOn) "Video: on" else "Video: off"
+            }
+        }
+        val trackButton = Button(this).apply {
+            text = if (gyroMode) "Track: gyro" else "Track: ARCore"
+            setOnClickListener {
+                prefs.edit().putBoolean("gyroMode", !gyroMode).apply()
+                recreate() // Starts or stops ARCore and the camera
+            }
+        }
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(hostField)
             addView(connectButton)
             addView(calibrateButton)
+            addView(trackButton)
             addView(zoomButton)
+            addView(videoButton)
             addView(lagFixButton)
         }
         val overlay = LinearLayout(this).apply {
@@ -159,6 +183,17 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     override fun onResume() {
         super.onResume()
         hideSystemUi()
+        @Suppress("DEPRECATION")
+        displayTurns = windowManager.defaultDisplay.rotation // Surface.ROTATION_0..270 are 0..3
+        if (gyroMode) {
+            trackingText = if (gyro.available) "gyro - press Calibrate facing forward" else "no gyro on this phone"
+            gyro.onOrientation = { t, r -> sendGyroPose(t, r) }
+            glView.onResume()
+            gyro.start()
+            startLink()
+            return
+        }
+        gyro.onOrientation = null
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), 0)
             return
@@ -223,7 +258,22 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             lightEstimationMode = Config.LightEstimationMode.DISABLED
             depthMode = Config.DepthMode.DISABLED
             updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+            focusMode = Config.FocusMode.AUTO // Fixed focus left the image soft, giving ARCore too few features to lock on
         })
+    }
+
+    /** Gyro tracking: send the phone's orientation as the display-oriented pose ARCore would give */
+    private fun sendGyroPose(timestampNs: Long, deviceToWorld: FloatArray) {
+        val a = Rot.quarterTurnsZ(displayTurns)                           // device axes -> display axes
+        val displayToWorld = Rot.mul(Rot.mul(Rot.ANDROID_TO_Y_UP, deviceToWorld), Rot.transpose(a))
+        val s = seq++
+        poseGyro[s] = deviceToWorld
+        poseSentNs[s] = System.nanoTime()
+        if (s % 100 == 0) {
+            poseGyro.keys.filter { it < s - 300 }.forEach { poseGyro.remove(it); poseSentNs.remove(it) }
+        }
+        link?.send(s, timestampNs, Rot.toQuat(displayToWorld), true, calibrate, ZOOMS[zoom].second)
+        frames++
     }
 
     private fun applyHost() {
@@ -263,10 +313,11 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             v.framesDecoded == 0 -> "Video: waiting for VBS (video needs Wi-Fi, not usb)"
             else -> "Video: ${v.videoWidth}x${v.videoHeight}, ${v.framesDecoded} frames, ${v.framesDropped} dropped, " +
                 "${v.keyRequests} key requests, receive-to-screen %.1f ms".format(v.decodeMsAvg) +
-                (if (!gyro.available) ", no gyro" else if (!axes.settled) ", lag fix learning axes (move the phone)" else "")
+                (if (!gyro.available) ", no gyro" else if (!gyroMode && !axes.settled) ", lag fix learning axes (move the phone)" else "")
         }
         crosshair.visibility = if (v != null && v.framesDecoded > 0 && System.nanoTime() - v.lastFrameNs < 1_000_000_000L) View.VISIBLE else View.GONE
-        statusText.text = "ARCore: $trackingText  ($poseRate poses/s, camera ${cameraFps} fps)\n$linkText\n$videoText"
+        val source = if (gyroMode) "Gyro: $trackingText  ($poseRate poses/s)" else "ARCore: $trackingText  ($poseRate poses/s, camera ${cameraFps} fps)"
+        statusText.text = "$source\n$linkText\n$videoText"
     }
 
     @Suppress("DEPRECATION")
@@ -297,21 +348,25 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     @Suppress("DEPRECATION")
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        val s = session ?: return
-        if (textureSetFor !== s) {
+        val s = session // null in gyro mode
+        if (s != null && textureSetFor !== s) {
             s.setCameraTextureName(background.texture)
             textureSetFor = s
             displayChanged = true
         }
-        if (displayChanged) {
+        if (s != null && displayChanged) {
             s.setDisplayGeometry(windowManager.defaultDisplay.rotation, viewWidth, viewHeight)
             displayChanged = false
         }
         val v = video
-        if (videoStream == null && v != null) {
+        if (!videoOn && videoStream != null) {
+            videoStream?.close()
+            videoStream = null
+        }
+        if (videoOn && videoStream == null && v != null) {
             videoStream = try { VideoStream(v.surface) } catch (e: Exception) { null }
         }
-        val frame = try { s.update() } catch (e: Exception) { return }
+        val frame = if (s == null) null else try { s.update() } catch (e: Exception) { return }
 
         // Show the VBS video while it is arriving, otherwise the camera
         val stream = videoStream
@@ -326,10 +381,10 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             }
             v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, tanX, tanY,
                 if (lagFix) lagCorrection(info?.poseSeq) else Rot.IDENTITY)
-        } else {
+        } else if (frame != null) {
             background.draw(frame)
         }
-        if (frame.timestamp == lastTimestamp) return // No new camera frame yet
+        if (frame == null || frame.timestamp == lastTimestamp) return // Gyro mode, or no new camera frame yet
         lastTimestamp = frame.timestamp
 
         val camera = frame.camera
@@ -340,6 +395,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         val q = camera.displayOrientedPose.rotationQuaternion
         gyro.at(frame.timestamp)?.let { g ->
             poseGyro[seq] = g
+            poseSentNs[seq] = System.nanoTime()
             if (tracking) axes.add(Rot.fromQuat(q), g)
             if (poseGyro.size > 300) poseGyro.keys.filter { it < seq - 200 }.forEach { poseGyro.remove(it) }
         }
@@ -350,8 +406,12 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     /** Rotation (column-major, for the shader) from the current view to the view a frame was drawn with */
     private fun lagCorrection(poseSeq: Int?): FloatArray {
         val then = poseSeq?.let { poseGyro[it] } ?: return Rot.IDENTITY
+        // A frame drawn with an old pose means VBS is holding its view (e.g. ARCore not tracking):
+        // turning the picture by everything since then would slide it away, so leave it
+        val sent = poseSentNs[poseSeq] ?: return Rot.IDENTITY
+        if (System.nanoTime() - sent > 400_000_000L) return Rot.IDENTITY
         val now = gyro.latest() ?: return Rot.IDENTITY
-        val a = Rot.quarterTurnsZ(axes.quarterTurns)                // device axes -> display axes
+        val a = Rot.quarterTurnsZ(if (gyroMode) displayTurns else axes.quarterTurns) // device axes -> display axes
         val turn = Rot.mul(Rot.transpose(then), now)                // now -> then, in device axes
         val inDisplay = Rot.mul(Rot.mul(a, turn), Rot.transpose(a))
         return Rot.transpose(inDisplay)

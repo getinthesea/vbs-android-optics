@@ -24,6 +24,27 @@ object Rot {
 
     fun transpose(a: FloatArray) = floatArrayOf(a[0], a[3], a[6], a[1], a[4], a[7], a[2], a[5], a[8])
 
+    /** Rotation matrix to quaternion (x, y, z, w) */
+    fun toQuat(m: FloatArray): FloatArray {
+        val trace = m[0] + m[4] + m[8]
+        return if (trace > 0) {
+            val s = Math.sqrt(trace + 1.0).toFloat() * 2
+            floatArrayOf((m[7] - m[5]) / s, (m[2] - m[6]) / s, (m[3] - m[1]) / s, 0.25f * s)
+        } else if (m[0] > m[4] && m[0] > m[8]) {
+            val s = Math.sqrt(1.0 + m[0] - m[4] - m[8]).toFloat() * 2
+            floatArrayOf(0.25f * s, (m[1] + m[3]) / s, (m[2] + m[6]) / s, (m[7] - m[5]) / s)
+        } else if (m[4] > m[8]) {
+            val s = Math.sqrt(1.0 + m[4] - m[0] - m[8]).toFloat() * 2
+            floatArrayOf((m[1] + m[3]) / s, 0.25f * s, (m[5] + m[7]) / s, (m[2] - m[6]) / s)
+        } else {
+            val s = Math.sqrt(1.0 + m[8] - m[0] - m[4]).toFloat() * 2
+            floatArrayOf((m[2] + m[6]) / s, (m[5] + m[7]) / s, 0.25f * s, (m[3] - m[1]) / s)
+        }
+    }
+
+    /** Android sensor world (X east, Y north, Z up) to the Y-up world ARCore and the plugin use (X east, Y up, Z south) */
+    val ANDROID_TO_Y_UP = floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, -1f, 0f)
+
     /** Quaternion (x, y, z, w) to rotation matrix */
     fun fromQuat(q: FloatArray): FloatArray {
         val (x, y, z, w) = q
@@ -85,11 +106,15 @@ class GyroTracker(context: Context) : SensorEventListener {
             history.addLast(Sample(e.timestamp, r))
             while (history.size > 500) history.removeFirst()
         }
+        onOrientation?.invoke(e.timestamp, r)
     }
 
     override fun onAccuracyChanged(s: Sensor?, accuracy: Int) {}
 
     fun latest(): FloatArray? = synchronized(lock) { history.lastOrNull()?.r }
+
+    /** Called on the sensor thread with each new orientation (timestamp, device -> world) - used for gyro tracking */
+    @Volatile var onOrientation: ((Long, FloatArray) -> Unit)? = null
 
     /** Orientation nearest to timestamp t (same clock as camera frames); latest if t is out of range */
     fun at(t: Long): FloatArray? = synchronized(lock) {
