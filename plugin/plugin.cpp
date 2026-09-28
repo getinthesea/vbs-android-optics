@@ -47,22 +47,17 @@ const char* ANCHOR_SQF =
     "if (!isNil \"ig2\") then { if (!isNull ig2) then { vao_anchor = ig2; }; }; "
     "if (!isNil \"var_ig\") then { if (!isNull var_ig) then { vao_anchor = var_ig; }; }; ";
 
-// Our camera at the anchor's eye. vao_* variables are ours; nothing else in VBS needs to know about them.
-void take_view(float fov)
-{
-    char cmd[1024];
-    sprintf_s(cmd,
-        "%s"
-        "vao_base = getDir vao_anchor; "
-        "vao_ui_was_hidden = isUIHidden; hideUI true; showHUD false; "
-        "vao_cam = \"camera\" camCreate (vao_anchor modelToWorld [0, 0.2, 1.7]); "
-        "vao_cam cameraEffect [\"internal\", \"BACK\"]; "
-        "showCinemaBorder false; "
-        "setCamFrustum [true, %f]; "
-        "vao_cam camCommit 0;",
-        ANCHOR_SQF, tan(fov * 3.14159265 / 360.0));
-    run(cmd);
-}
+// Our camera at the anchor's eye (vao_* variables are ours). Created whenever it is missing, not once: the phone
+// can connect before a mission has loaded, and a mission restart destroys the camera.
+const char* ENSURE_CAMERA_SQF =
+    "if (isNil \"vao_cam\") then { vao_cam = objNull; }; "
+    "if (isNull vao_cam) then { "
+    "vao_base = getDir vao_anchor; "
+    "vao_ui_was_hidden = isUIHidden; "
+    "vao_cam = \"camera\" camCreate (vao_anchor modelToWorld [0, 0.2, 1.7]); "
+    "vao_cam cameraEffect [\"internal\", \"BACK\"]; "
+    "showCinemaBorder false; "
+    "}; ";
 
 void release_view()
 {
@@ -97,38 +92,37 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         return;
     }
 
-    float want_fov = phone.fov_deg > 0 ? phone.fov_deg : DEFAULT_FOV_DEG;
-    char cmd[1024];
+    fov_deg = phone.fov_deg > 0 ? phone.fov_deg : DEFAULT_FOV_DEG;
     if (!active) {
-        take_view(want_fov);
         active = true;
-        fov_deg = want_fov;
         aligned = false;
         heading_zero = phone.heading;
         last_calibrate = phone.calibrate;
     }
 
-    // Line the phone up with where the player faces: on the first tracked pose, and on Calibrate
+    // Line the phone up with where the anchor faces: on the first tracked pose, and on Calibrate
+    const char* realign = "";
     if ((phone.tracking && !aligned) || phone.calibrate != last_calibrate) {
         heading_zero = phone.heading;
         aligned = phone.tracking;
         last_calibrate = phone.calibrate;
-        run("vao_base = getDir vao_anchor;");
+        realign = "vao_base = getDir vao_anchor; ";
     }
 
-    if (fabs(want_fov - fov_deg) > 0.01f) {
-        fov_deg = want_fov;
-        sprintf_s(cmd, "setCamFrustum [true, %f];", tan(fov_deg * 3.14159265 / 360.0));
-        run(cmd);
-    }
-
-    // Aim (held at the last tracked direction while ARCore is not tracking) and follow the anchor, re-picked
-    // each step in case the scenario sets var_ig after the phone connects
+    // Every step, once a mission is running: pick the anchor (the scenario may set var_ig later), make sure our
+    // camera exists, keep the HUD hidden and the zoom set, follow the anchor and aim with the phone
+    // (held at the last tracked direction while ARCore is not tracking)
+    char cmd[2048];
     sprintf_s(cmd,
-        "%s"
+        "if (!isNull player) then { "
+        "%s%s%s"
+        "hideUI true; showHUD false; "
+        "setCamFrustum [true, %f]; "
         "vao_cam camSetPos (vao_anchor modelToWorld [0, 0.2, 1.7]); vao_cam camCommit 0; "
-        "setCamFrustumOffsets [true, vao_base + %.3f, %.3f, %.3f];",
-        ANCHOR_SQF, phone.heading - heading_zero, phone.pitch, phone.roll);
+        "setCamFrustumOffsets [true, vao_base + %.3f, %.3f, %.3f]; "
+        "};",
+        ANCHOR_SQF, ENSURE_CAMERA_SQF, realign,
+        tan(fov_deg * 3.14159265 / 360.0), phone.heading - heading_zero, phone.pitch, phone.roll);
     run(cmd);
 
     streamer_update(phone.ip);
