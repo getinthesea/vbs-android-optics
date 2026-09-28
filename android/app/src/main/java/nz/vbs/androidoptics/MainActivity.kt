@@ -61,6 +61,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     private val ZOOMS = listOf("1x" to 60f, "NVG" to 40f, "4x" to 15f, "7x binos" to 7.6f, "10x" to 5.5f, "15x" to 3.7f)
     @Volatile private var zoom = 3
     private lateinit var crosshair: CrosshairView
+    private lateinit var cornerMask: CornerMaskView
     private var textureSetFor: Session? = null
     private var displayChanged = false
     private var viewWidth = 0
@@ -156,7 +157,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(controls)
         }
         val statsButton = Button(this).apply {
-            text = "Stats"
+            text = "Settings"
             textSize = 20f // Same size as Calibrate, easy to hit
             setOnClickListener {
                 panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
@@ -169,9 +170,12 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(statsButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(panel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
+        for (b in listOf(statsButton, calibrateButton, connectButton, trackButton, zoomButton, videoButton)) styleButton(b)
         crosshair = CrosshairView(this).apply { visibility = View.GONE }
+        cornerMask = CornerMaskView(this)
         setContentView(FrameLayout(this).apply {
             addView(glView)
+            addView(cornerMask)
             addView(crosshair)
             addView(topLeft, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
             addView(calibrateButton, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { setMargins(24, 24, 24, 24) })
@@ -313,8 +317,23 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         }
         crosshair.visibility = if (v != null && v.framesDecoded > 0 && System.nanoTime() - v.lastFrameNs < 1_000_000_000L) View.VISIBLE else View.GONE
         if (v != null) crosshair.setOptics(ZOOMS[zoom].second, v.videoWidth, v.videoHeight)
+        val showingVideo = crosshair.visibility == View.VISIBLE && v != null
+        cornerMask.setVideoSize(if (showingVideo) v!!.videoWidth else 0, if (showingVideo) v!!.videoHeight else 0)
         val source = if (gyroMode) "Gyro: $trackingText  ($poseRate poses/s)" else "ARCore: $trackingText  ($poseRate poses/s, camera ${cameraFps} fps)"
         statusText.text = "$source\n$linkText\n$videoText"
+    }
+
+    /** #444444 buttons with black text */
+    private fun styleButton(b: Button) {
+        b.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF444444.toInt())
+            cornerRadius = 12f
+        }
+        b.setTextColor(Color.BLACK)
+        b.isAllCaps = false
+        b.setPadding(32, 16, 32, 16)
+        b.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { setMargins(6, 6, 6, 6) }
     }
 
     @Suppress("DEPRECATION")
