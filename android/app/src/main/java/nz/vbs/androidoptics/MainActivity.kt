@@ -113,7 +113,6 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         }
         val calibrateButton = Button(this).apply {
             text = "Calibrate"
-            textSize = 20f
             setOnClickListener { calibrate = (calibrate + 1) and 0xFF }
         }
         val zoomButton = Button(this).apply {
@@ -158,19 +157,32 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         }
         val statsButton = Button(this).apply {
             text = "Settings"
-            textSize = 20f // Same size as Calibrate, easy to hit
             setOnClickListener {
                 panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                 hideSystemUi()
             }
         }
+        // Settings and Calibrate: the same small size, tucked into the black corners of the mask
+        val density = resources.displayMetrics.density
+        val cornerW = (48 * density).toInt()
+        val cornerH = (26 * density).toInt()
+        val cornerGap = (3 * density).toInt()
         val topLeft = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 24)
-            addView(statsButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            setPadding(cornerGap, cornerGap, cornerGap, cornerGap)
+            addView(statsButton, LinearLayout.LayoutParams(cornerW, cornerH))
             addView(panel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
         for (b in listOf(statsButton, calibrateButton, connectButton, trackButton, zoomButton, videoButton)) styleButton(b)
+        for (b in listOf(statsButton, calibrateButton)) {
+            b.textSize = 10f
+            b.setPadding(0, 0, 0, 0)
+            b.minWidth = 0
+            b.minHeight = 0
+            b.minimumWidth = 0
+            b.minimumHeight = 0
+        }
+        statsButton.layoutParams = LinearLayout.LayoutParams(cornerW, cornerH) // styleButton reset it
         crosshair = CrosshairView(this).apply { visibility = View.GONE }
         cornerMask = CornerMaskView(this)
         setContentView(FrameLayout(this).apply {
@@ -178,7 +190,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(cornerMask)
             addView(crosshair)
             addView(topLeft, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
-            addView(calibrateButton, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { setMargins(24, 24, 24, 24) })
+            addView(calibrateButton, FrameLayout.LayoutParams(cornerW, cornerH, Gravity.TOP or Gravity.END).apply { setMargins(cornerGap, cornerGap, cornerGap, cornerGap) })
         })
         ui.post(object : Runnable {
             override fun run() {
