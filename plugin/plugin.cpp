@@ -12,6 +12,8 @@
 #include <windows.h>
 #include <cmath>
 #include <cstdio>
+#include <deque>
+#include <mutex>
 #include <string>
 #include "vbs_plugin.h"
 #include "phone_link.h"
@@ -58,7 +60,49 @@ void release_view()
         "if (!isNil \"vao_cam\") then { vao_cam cameraEffect [\"terminate\", \"BACK\"]; camDestroy vao_cam; vao_cam = nil; };");
 }
 
+// When each pose was applied, so a captured frame can be matched to the pose VBS actually drew it with
+// (read by the streamer thread). Times are QPC in 100 ns units, the same clock as Windows Graphics Capture.
+std::mutex applied_mutex;
+struct Applied { long long t; uint32_t seq; };
+std::deque<Applied> applied;
+double step_interval = 400000; // smoothed time between simulation steps (40 ms to start)
+long long last_step = 0;
+
+long long now_100ns()
+{
+    static LARGE_INTEGER freq = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f; }();
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return (long long)(c.QuadPart * (10000000.0 / freq.QuadPart));
+}
+
+void record_applied(uint32_t seq)
+{
+    long long t = now_100ns();
+    std::lock_guard<std::mutex> lock(applied_mutex);
+    if (last_step) step_interval = step_interval * 0.9 + (t - last_step) * 0.1;
+    last_step = t;
+    applied.push_back({ t, seq });
+    while (applied.size() > 256) applied.pop_front();
+}
+
 } // namespace
+
+// A frame presented at present_100ns was rendered in the frame before, from the pose applied at the
+// simulation step before that render
+uint32_t pose_seq_drawn_at(long long present_100ns, double* age_ms)
+{
+    std::lock_guard<std::mutex> lock(applied_mutex);
+    if (applied.empty()) return 0;
+    long long target = present_100ns - (long long)step_interval;
+    const Applied* best = &applied.front();
+    for (const auto& a : applied) {
+        if (a.t > target) break;
+        best = &a;
+    }
+    if (age_ms) *age_ms = (present_100ns - best->t) / 10000.0;
+    return best->seq;
+}
 
 VBS_PLUGIN_EXPORT void WINAPI RegisterCommandFnc(void* executeCommandFnc)
 {
@@ -115,6 +159,7 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         "setCamFrustumOffsets [true, vao_base + %.3f, %.3f, %.3f];",
         phone.heading - heading_zero, phone.pitch, phone.roll);
     run(cmd);
+    record_applied(phone.seq);
 
     streamer_update(phone.ip, phone.seq, (float)tan(fov_deg * 3.14159265 / 360.0));
 }

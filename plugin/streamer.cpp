@@ -498,7 +498,7 @@ static bool run_session(const Options& opt, SOCKET sock)
     std::vector<uint8_t> au;
     std::vector<uint8_t> packet(sizeof(VideoPacketHeader) + VIDEO_PAYLOAD);
     // Stats
-    double stats_start = now_ms(), enc_total = 0;
+    double stats_start = now_ms(), enc_total = 0, stat_pose_age = 0;
     int stats_frames = 0;
     size_t stats_bytes = 0;
 
@@ -533,7 +533,10 @@ static bool run_session(const Options& opt, SOCKET sock)
         }
 
         uint32_t ip = want_ip;
-        uint32_t pose_seq = want_seq;
+        // Label the frame with the pose VBS drew it with, not the newest one (that under-corrects on the phone)
+        double pose_age = 0;
+        uint32_t pose_seq = pose_seq_drawn_at(frame.SystemRelativeTime().count(), &pose_age);
+        stat_pose_age += pose_age;
         float tan_x = want_tan_x;
         if (!ip) { frame.Close(); log("phone gone, stopped streaming"); return false; }
         if (ip != last_ip) {
@@ -603,10 +606,11 @@ static bool run_session(const Options& opt, SOCKET sock)
 
         double elapsed = now_ms() - stats_start;
         if (elapsed >= 2000) {
-            log("streaming %ux%u, %.0f fps, %.1f Mbps, encode %.1f ms, encoder holds %.1f ms | %s",
+            log("streaming %ux%u, %.0f fps, %.1f Mbps, encode %.1f ms, encoder holds %.1f ms, pose %.0f ms before present | %s",
                 out_w, out_h, stats_frames * 1000.0 / elapsed, stats_bytes * 8 / elapsed / 1000.0,
                 stats_frames ? enc_total / stats_frames : 0.0, enc.stat_outputs ? enc.stat_delay / enc.stat_outputs : 0.0,
-                enc.name.c_str());
+                stats_frames ? stat_pose_age / stats_frames : 0.0, enc.name.c_str());
+            stat_pose_age = 0;
             enc.stat_delay = 0;
             enc.stat_outputs = 0;
             stats_start = now_ms();
