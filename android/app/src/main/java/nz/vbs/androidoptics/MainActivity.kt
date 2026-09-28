@@ -142,22 +142,39 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             gravity = Gravity.CENTER_VERTICAL
             addView(hostField)
             addView(connectButton)
-            addView(calibrateButton)
             addView(trackButton)
             addView(zoomButton)
             addView(videoButton)
         }
-        val overlay = LinearLayout(this).apply {
+        // Everything but Calibrate lives in a panel behind the Stats button (top left), so the view stays clear
+        val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 24, 32, 24)
+            setPadding(24, 16, 24, 16)
+            setBackgroundColor(0x99000000.toInt())
+            visibility = View.GONE
             addView(statusText)
             addView(controls)
+        }
+        val statsButton = Button(this).apply {
+            text = "Stats"
+            textSize = 20f // Same size as Calibrate, easy to hit
+            setOnClickListener {
+                panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                hideSystemUi()
+            }
+        }
+        val topLeft = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 24, 24, 24)
+            addView(statsButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(panel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
         crosshair = CrosshairView(this).apply { visibility = View.GONE }
         setContentView(FrameLayout(this).apply {
             addView(glView)
             addView(crosshair)
-            addView(overlay)
+            addView(topLeft, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
+            addView(calibrateButton, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { setMargins(24, 24, 24, 24) })
         })
         ui.post(object : Runnable {
             override fun run() {
