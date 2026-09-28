@@ -8,23 +8,17 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
-/**
- * Shows the decoded VBS video. The fragment shader can re-aim the frame by a small rotation, so the view can
- * follow the phone between frames (lag correction): each screen pixel's ray is rotated into the orientation
- * the frame was drawn with and looked up there. GL thread only.
- */
+/** Shows the decoded VBS video, letterboxed to its shape. GL thread only. */
 class VideoView {
     lateinit var surface: Surface; private set
     private lateinit var surfaceTexture: SurfaceTexture
     private var texture = 0
     private var program = 0
     @Volatile private var frameAvailable = false
+    private var hasFrame = false
     private val texMatrix = FloatArray(16)
     private val quad: FloatBuffer = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         .apply { put(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)); position(0) }
-
-    /** Frame number of the image currently in the texture (-1 before the first) */
-    var frameNumber = -1L; private set
 
     fun create() {
         val t = IntArray(1)
@@ -40,45 +34,31 @@ class VideoView {
         program = link(
             """
             attribute vec2 a_Position;
-            varying vec2 v_Ndc;
-            void main() { gl_Position = vec4(a_Position, 0.0, 1.0); v_Ndc = a_Position; }
+            varying vec2 v_Uv;
+            void main() { gl_Position = vec4(a_Position, 0.0, 1.0); v_Uv = a_Position * 0.5 + 0.5; }
             """,
             """
             #extension GL_OES_EGL_image_external : require
-            precision highp float;
-            varying vec2 v_Ndc;
+            precision mediump float;
+            varying vec2 v_Uv;
             uniform samplerExternalOES u_Texture;
             uniform mat4 u_TexMatrix;
-            uniform mat3 u_Rot;  // current view -> the view the frame was drawn with
-            uniform vec2 u_Tan;  // tangents of half the frame's field of view
-            void main() {
-                vec3 ray = u_Rot * vec3(v_Ndc * u_Tan, -1.0);
-                vec2 ndc = (ray.xy / -ray.z) / u_Tan;
-                if (ray.z > -0.0001 || abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) {
-                    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-                } else {
-                    gl_FragColor = texture2D(u_Texture, (u_TexMatrix * vec4(ndc * 0.5 + 0.5, 0.0, 1.0)).xy);
-                }
-            }
+            void main() { gl_FragColor = texture2D(u_Texture, (u_TexMatrix * vec4(v_Uv, 0.0, 1.0)).xy); }
             """)
     }
 
-    /** Latches the newest decoded frame, if any; true if it changed */
-    fun update(): Boolean {
-        if (!frameAvailable) return false
+    /** Latches the newest decoded frame, if any */
+    fun update() {
+        if (!frameAvailable) return
         frameAvailable = false
         surfaceTexture.updateTexImage()
         surfaceTexture.getTransformMatrix(texMatrix)
-        frameNumber = surfaceTexture.timestamp / 1000 // The decoder's presentation time is the frame number
-        return true
+        hasFrame = true
     }
 
-    /**
-     * Draws the frame letterboxed into the view. tanX/tanY: tangents of half the frame's field of view.
-     * rot: 3x3 column-major rotation from the current view to the frame's view (identity = no correction).
-     */
-    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int, tanX: Float, tanY: Float, rot: FloatArray) {
-        if (frameNumber < 0 || videoWidth == 0 || videoHeight == 0) return
+    /** Draws the frame letterboxed into the view */
+    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int) {
+        if (!hasFrame || videoWidth == 0 || videoHeight == 0) return
         val videoAspect = videoWidth.toFloat() / videoHeight
         val viewAspect = viewWidth.toFloat() / viewHeight
         if (viewAspect > videoAspect) {
@@ -93,8 +73,6 @@ class VideoView {
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture)
         GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "u_Texture"), 0)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "u_TexMatrix"), 1, false, texMatrix, 0)
-        GLES20.glUniformMatrix3fv(GLES20.glGetUniformLocation(program, "u_Rot"), 1, false, rot, 0)
-        GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "u_Tan"), tanX, tanY)
         val position = GLES20.glGetAttribLocation(program, "a_Position")
         quad.position(0)
         GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 0, quad)

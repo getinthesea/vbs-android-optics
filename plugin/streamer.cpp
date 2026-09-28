@@ -3,7 +3,7 @@
 //   with the screen on Intel, where Desktop Duplication refuses) -> crop to the client area + scale +
 //   BGRA->NV12 on the GPU that shows VBS ->
 //   its hardware H.264 encoder (no B-frames) -> UDP packets (protocol.h) to the phone.
-// The plugin tells it where the phone is, which pose the view is aimed with and the field of view.
+// The plugin tells it where the phone is.
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -50,8 +50,6 @@ static std::thread worker;
 
 // Set by the plugin every simulation step
 static std::atomic<uint32_t> want_ip{ 0 };
-static std::atomic<uint32_t> want_seq{ 0 };
-static std::atomic<float> want_tan_x{ 0 };
 
 // Latest status line for pluginFunction "status"
 static std::mutex status_mutex;
@@ -498,7 +496,7 @@ static bool run_session(const Options& opt, SOCKET sock)
     std::vector<uint8_t> au;
     std::vector<uint8_t> packet(sizeof(VideoPacketHeader) + VIDEO_PAYLOAD);
     // Stats
-    double stats_start = now_ms(), enc_total = 0, stat_pose_age = 0;
+    double stats_start = now_ms(), enc_total = 0;
     int stats_frames = 0;
     size_t stats_bytes = 0;
 
@@ -533,11 +531,6 @@ static bool run_session(const Options& opt, SOCKET sock)
         }
 
         uint32_t ip = want_ip;
-        // Label the frame with the pose VBS drew it with, not the newest one (that under-corrects on the phone)
-        double pose_age = 0;
-        uint32_t pose_seq = pose_seq_drawn_at(frame.SystemRelativeTime().count(), &pose_age);
-        stat_pose_age += pose_age;
-        float tan_x = want_tan_x;
         if (!ip) { frame.Close(); log("phone gone, stopped streaming"); return false; }
         if (ip != last_ip) {
             char text[32];
@@ -593,9 +586,6 @@ static bool run_session(const Options& opt, SOCKET sock)
             h.flags = keyframe ? 1 : 0;
             size_t offset = (size_t)i * VIDEO_PAYLOAD;
             h.payload_len = (uint16_t)min((size_t)VIDEO_PAYLOAD, au.size() - offset);
-            h.pose_seq = pose_seq;
-            h.tan_x = tan_x;
-            h.tan_y = tan_x * src_h / src_w; // VBS keeps the window's shape
             memcpy(packet.data(), &h, sizeof(h));
             memcpy(packet.data() + sizeof(h), au.data() + offset, h.payload_len);
             sendto(sock, (const char*)packet.data(), (int)(sizeof(h) + h.payload_len), 0, (sockaddr*)&to, sizeof(to));
@@ -606,11 +596,10 @@ static bool run_session(const Options& opt, SOCKET sock)
 
         double elapsed = now_ms() - stats_start;
         if (elapsed >= 2000) {
-            log("streaming %ux%u, %.0f fps, %.1f Mbps, encode %.1f ms, encoder holds %.1f ms, pose %.0f ms before present | %s",
+            log("streaming %ux%u, %.0f fps, %.1f Mbps, encode %.1f ms, encoder holds %.1f ms | %s",
                 out_w, out_h, stats_frames * 1000.0 / elapsed, stats_bytes * 8 / elapsed / 1000.0,
                 stats_frames ? enc_total / stats_frames : 0.0, enc.stat_outputs ? enc.stat_delay / enc.stat_outputs : 0.0,
-                stats_frames ? stat_pose_age / stats_frames : 0.0, enc.name.c_str());
-            stat_pose_age = 0;
+                enc.name.c_str());
             enc.stat_delay = 0;
             enc.stat_outputs = 0;
             stats_start = now_ms();
@@ -669,11 +658,9 @@ void streamer_stop()
     if (worker.joinable()) worker.detach();
 }
 
-void streamer_update(uint32_t phone_ip, uint32_t pose_seq, float tan_half_fov_x)
+void streamer_update(uint32_t phone_ip)
 {
     want_ip = phone_ip;
-    want_seq = pose_seq;
-    want_tan_x = tan_half_fov_x;
 }
 
 std::string streamer_status()

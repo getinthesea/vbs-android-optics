@@ -20,13 +20,11 @@ import java.util.concurrent.TimeUnit
 class VideoStream(private val surface: Surface) {
     companion object {
         const val PORT = 47831
-        private const val HEADER = 36
+        private const val HEADER = 16
     }
 
-    /** What a decoded frame was drawn with, looked up by frame number when it reaches the screen */
-    class FrameInfo(val poseSeq: Int, val frustum: FloatArray, val receivedNs: Long)
-
-    val frameInfo = ConcurrentHashMap<Long, FrameInfo>()
+    /** When each frame finished arriving, for the receive-to-screen figure */
+    private val receivedNs = ConcurrentHashMap<Long, Long>()
     @Volatile var videoWidth = 0; private set
     @Volatile var videoHeight = 0; private set
     @Volatile var framesDecoded = 0; private set
@@ -37,7 +35,7 @@ class VideoStream(private val surface: Surface) {
     @Volatile var error: String? = null; private set
 
     private class AccessUnit(val frame: Long, val data: ByteArray, val keyframe: Boolean)
-    private class Assembly(val count: Int, val poseSeq: Int, val frustum: FloatArray, val keyframe: Boolean) {
+    private class Assembly(val count: Int, val keyframe: Boolean) {
         val parts = arrayOfNulls<ByteArray>(count)
         var have = 0
     }
@@ -95,11 +93,9 @@ class VideoStream(private val surface: Surface) {
             val keyframe = (h.get().toInt() and 1) != 0
             h.get()
             val len = h.short.toInt() and 0xFFFF
-            val poseSeq = h.int
-            val frustum = floatArrayOf(h.float, h.float) // tangents of half the field of view: x, y
             if (frame <= lastDelivered || index >= count || HEADER + len > packet.length) continue
 
-            val a = assemblies.getOrPut(frame) { Assembly(count, poseSeq, frustum, keyframe) }
+            val a = assemblies.getOrPut(frame) { Assembly(count, keyframe) }
             if (a.parts[index] == null) {
                 a.parts[index] = buf.copyOfRange(HEADER, HEADER + len)
                 a.have++
@@ -127,8 +123,8 @@ class VideoStream(private val surface: Surface) {
             val data = ByteArray(a.parts.sumOf { it!!.size })
             var o = 0
             for (p in a.parts) { System.arraycopy(p!!, 0, data, o, p.size); o += p.size }
-            frameInfo[frame] = FrameInfo(a.poseSeq, a.frustum, System.nanoTime())
-            if (frameInfo.size > 120) frameInfo.keys.filter { it < frame - 60 }.forEach { frameInfo.remove(it) }
+            receivedNs[frame] = System.nanoTime()
+            if (receivedNs.size > 120) receivedNs.keys.filter { it < frame - 60 }.forEach { receivedNs.remove(it) }
             if (!queue.offer(AccessUnit(frame, data, keyframe))) {
                 queue.clear() // Decoder fell behind: start again from a keyframe
                 waitingForKey = true
@@ -175,11 +171,11 @@ class VideoStream(private val surface: Surface) {
                         continue
                     }
                     if (out < 0) break
-                    frameInfo[info.presentationTimeUs]?.let {
-                        val ms = (System.nanoTime() - it.receivedNs) / 1e6
+                    receivedNs[info.presentationTimeUs]?.let {
+                        val ms = (System.nanoTime() - it) / 1e6
                         decodeMsAvg = decodeMsAvg * 0.9 + ms * 0.1
                     }
-                    codec.releaseOutputBuffer(out, true) // presentationTimeUs (the frame number) becomes the surface timestamp
+                    codec.releaseOutputBuffer(out, true)
                     framesDecoded++
                     lastFrameNs = System.nanoTime()
                 }

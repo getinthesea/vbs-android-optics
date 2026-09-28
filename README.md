@@ -1,6 +1,6 @@
 # VBS Android Optics
 
-Use an Android phone as a hand-held optic in VBS3. The phone's ARCore tracking aims the view, and the view is
+Use an Android phone as a hand-held optic in VBS3. The phone's orientation aims the view, and the view is
 streamed back to the phone's screen. It is one plugin DLL and one app, with no SQF, mission changes or `.pbo`.
 
 ## How it works
@@ -8,7 +8,7 @@ streamed back to the phone's screen. It is one plugin DLL and one app, with no S
 | | |
 |---|---|
 | `plugin/` | `VBSAndroidOptics.dll`, a VBS3 plugin (`plugins64`) |
-| `android/` | The VBS Android Optics app (Kotlin, ARCore) |
+| `android/` | The VBS Android Optics app (Kotlin) |
 
 While the app is connected, the plugin does the following:
 - **Camera:** looks through its own camera at the player's eye, aimed by the phone.
@@ -16,7 +16,6 @@ While the app is connected, the plugin does the following:
   - **Pitch and roll** come from gravity.
 - **Zoom:** sets the field of view picked on the phone (1×, NVG, 4×, 7× binos, 10×, 15×).
 - **Video:** streams the VBS window to the phone from a background thread, using hardware H.264 on the GPU that shows VBS. The phone decodes it in low-latency mode.
-- **Lag fix:** the phone turns each frame by how far it has rotated since VBS drew it, using its gyro. The **Lag fix** button compares with and without.
 - **Hand-back:** when the phone stops sending for 3 s, the normal VBS view comes back.
 
 The crosshair (and later any reticles) is drawn by the app.
@@ -42,9 +41,21 @@ Close VBS first, because it locks plugin DLLs.
 android\install.ps1         # app -> the USB-connected phone
 ```
 
-Hold the phone like a camera: landscape, with the screen towards you.
-- ARCore needs to see some movement against a detailed, well-lit scene before it starts tracking, so move the phone side to side at first.
-- Until it tracks, the view holds level and ahead.
+Hold the phone like a camera: landscape, with the screen towards you. Face the way you want as forward and press **Calibrate**.
+
+## Tracking
+
+The app has two tracking sources, switched with the **Gyro** / **ARCore** button (remembered):
+
+| | Gyro (default) | ARCore |
+|---|---|---|
+| Uses | Android's game rotation vector (gyro + accelerometer) | The camera plus motion sensors |
+| Rate | ~100 poses/s | Camera rate (30/s on a Galaxy A54) |
+| Start-up | Instant | Needs sideways movement against a detailed, well-lit scene |
+| Heading | Drifts slowly; re-zero with **Calibrate** | Holds once tracking |
+| Dark (dome) | Works | Needs light |
+
+Pitch and roll come from gravity in both. With ARCore, until it tracks the view holds level and ahead. ARCore would not hold tracking on the Galaxy A54 used for testing: its log showed motion-sensor data arriving late. That is why gyro is the default.
 
 ## Tests
 

@@ -31,7 +31,7 @@ struct PoseAck {                // 12 bytes
     uint32_t received;          // packets received since the plugin loaded
 };
 
-struct VideoPacketHeader {      // 36 bytes, then payload_len bytes of H.264 (Annex-B)
+struct VideoPacketHeader {      // 16 bytes, then payload_len bytes of H.264 (Annex-B)
     char     magic[4];          // "VAV1"
     uint32_t frame;             // increments per encoded frame
     uint16_t index;             // packet index within the frame
@@ -39,9 +39,6 @@ struct VideoPacketHeader {      // 36 bytes, then payload_len bytes of H.264 (An
     uint8_t  flags;             // bit 0: keyframe
     uint8_t  reserved;
     uint16_t payload_len;
-    uint32_t pose_seq;          // pose the view was aimed with when the frame was captured
-    float    tan_x, tan_y;      // tangents of half the frame's field of view
-    float    reserved2[2];
 };
 
 struct KeyRequest {             // 8 bytes, phone -> PC
@@ -52,5 +49,5 @@ struct KeyRequest {             // 8 bytes, phone -> PC
 
 static_assert(sizeof(PosePacket) == 36, "PosePacket layout");
 static_assert(sizeof(PoseAck) == 12, "PoseAck layout");
-static_assert(sizeof(VideoPacketHeader) == 36, "VideoPacketHeader layout");
+static_assert(sizeof(VideoPacketHeader) == 16, "VideoPacketHeader layout");
 static_assert(sizeof(KeyRequest) == 8, "KeyRequest layout");
