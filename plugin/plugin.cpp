@@ -1,8 +1,11 @@
 // VBSAndroidOptics.dll - use an Android phone (ARCore) as a hand-held optic in VBS3.
 //
 // While the VBS Android Optics app is connected, this plugin:
-//   - looks through its own camera at the player's eye, aimed by the phone (heading relative to where the
-//     player faced when the phone connected or Calibrate was pressed; pitch and roll from gravity),
+//   - looks through its own camera at the anchor's eye, aimed by the phone (heading relative to where the
+//     anchor faced when the phone connected or Calibrate was pressed; pitch and roll from gravity). The anchor
+//     is var_ig if the scenario sets it (e.g. JFSim's observation post), else a unit named ig2 or projector,
+//     else the player,
+//   - hides VBS's HUD (weapon status, crosshair, action menu) and restores it afterwards,
 //   - sets the field of view the phone asks for (its zoom presets),
 //   - streams the VBS window to the phone.
 // When the phone stops sending for a few seconds, the normal view is handed back. No SQF or .pbo is needed.
@@ -37,25 +40,35 @@ void run(const char* sqf)
     if (ExecuteCommand) ExecuteCommand(sqf, nullptr, 0);
 }
 
-// Our camera at the player's eye. vao_* variables are ours; nothing else in VBS needs to know about them.
+// Picks the anchor for the view: var_ig (the scenario's observation post), ig2, projector, else the player
+const char* ANCHOR_SQF =
+    "vao_anchor = player; "
+    "if (!isNil \"projector\") then { if (!isNull projector) then { vao_anchor = projector; }; }; "
+    "if (!isNil \"ig2\") then { if (!isNull ig2) then { vao_anchor = ig2; }; }; "
+    "if (!isNil \"var_ig\") then { if (!isNull var_ig) then { vao_anchor = var_ig; }; }; ";
+
+// Our camera at the anchor's eye. vao_* variables are ours; nothing else in VBS needs to know about them.
 void take_view(float fov)
 {
-    char cmd[512];
+    char cmd[1024];
     sprintf_s(cmd,
-        "vao_base = getDir player; "
-        "vao_cam = \"camera\" camCreate (player modelToWorld [0, 0.2, 1.7]); "
+        "%s"
+        "vao_base = getDir vao_anchor; "
+        "vao_ui_was_hidden = isUIHidden; hideUI true; showHUD false; "
+        "vao_cam = \"camera\" camCreate (vao_anchor modelToWorld [0, 0.2, 1.7]); "
         "vao_cam cameraEffect [\"internal\", \"BACK\"]; "
         "showCinemaBorder false; "
         "setCamFrustum [true, %f]; "
         "vao_cam camCommit 0;",
-        tan(fov * 3.14159265 / 360.0));
+        ANCHOR_SQF, tan(fov * 3.14159265 / 360.0));
     run(cmd);
 }
 
 void release_view()
 {
     run("setCamFrustumOffsets [false]; setCamFrustum [false]; "
-        "if (!isNil \"vao_cam\") then { vao_cam cameraEffect [\"terminate\", \"BACK\"]; camDestroy vao_cam; vao_cam = nil; };");
+        "if (!isNil \"vao_cam\") then { vao_cam cameraEffect [\"terminate\", \"BACK\"]; camDestroy vao_cam; vao_cam = nil; }; "
+        "showHUD true; if (!isNil \"vao_ui_was_hidden\") then { hideUI vao_ui_was_hidden; } else { hideUI false; };");
 }
 
 } // namespace
@@ -85,7 +98,7 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
     }
 
     float want_fov = phone.fov_deg > 0 ? phone.fov_deg : DEFAULT_FOV_DEG;
-    char cmd[512];
+    char cmd[1024];
     if (!active) {
         take_view(want_fov);
         active = true;
@@ -100,7 +113,7 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         heading_zero = phone.heading;
         aligned = phone.tracking;
         last_calibrate = phone.calibrate;
-        run("vao_base = getDir player;");
+        run("vao_base = getDir vao_anchor;");
     }
 
     if (fabs(want_fov - fov_deg) > 0.01f) {
@@ -109,11 +122,13 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         run(cmd);
     }
 
-    // Aim (held at the last tracked direction while ARCore is not tracking) and follow the player's position
+    // Aim (held at the last tracked direction while ARCore is not tracking) and follow the anchor, re-picked
+    // each step in case the scenario sets var_ig after the phone connects
     sprintf_s(cmd,
-        "vao_cam camSetPos (player modelToWorld [0, 0.2, 1.7]); vao_cam camCommit 0; "
+        "%s"
+        "vao_cam camSetPos (vao_anchor modelToWorld [0, 0.2, 1.7]); vao_cam camCommit 0; "
         "setCamFrustumOffsets [true, vao_base + %.3f, %.3f, %.3f];",
-        phone.heading - heading_zero, phone.pitch, phone.roll);
+        ANCHOR_SQF, phone.heading - heading_zero, phone.pitch, phone.roll);
     run(cmd);
 
     streamer_update(phone.ip);
