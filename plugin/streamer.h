@@ -8,4 +8,6 @@ void streamer_stop();
 // Every simulation step: where to send (0 = no phone on Wi-Fi, stop capturing)
 void streamer_update(uint32_t phone_ip);
 std::string streamer_status();
+// Width / height of VBS's window (0 if not found)
+double vbs_window_aspect();
 

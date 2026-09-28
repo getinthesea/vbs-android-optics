@@ -116,6 +116,15 @@ static RECT client_rect_on_screen(HWND hwnd)
     return RECT{ tl.x, tl.y, br.x, br.y };
 }
 
+double vbs_window_aspect()
+{
+    HWND vbs = find_vbs_window();
+    if (!vbs) return 0;
+    RECT r;
+    GetClientRect(vbs, &r);
+    return r.bottom > 0 ? (double)r.right / r.bottom : 0;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Hardware H.264 encoder (Media Foundation, asynchronous MFT on our D3D11 device)
 
@@ -347,9 +356,9 @@ struct Encoder {
 // One streaming session: lasts until the VBS window changes size, VBS closes or the desktop is lost
 
 struct Options {
-    UINT height = 720;
+    UINT max_height = 1080;   // VBS's own size up to this, so the phone gets every pixel VBS draws
     UINT fps = 60;
-    UINT mbps = 12;
+    UINT mbps = 20;
 };
 
 static bool run_session(const Options& opt, SOCKET sock)
@@ -419,8 +428,8 @@ static bool run_session(const Options& opt, SOCKET sock)
     }
     auto capture_size = item.Size();
 
-    // Stream size: opt.height tall, VBS's shape, multiple of 16
-    UINT out_h = opt.height;
+    // Stream size: VBS's own size (at most opt.max_height tall), VBS's shape, multiple of 16
+    UINT out_h = ((UINT)min(src_h, (int)opt.max_height) + 8) / 16 * 16;
     UINT out_w = (UINT)((double)out_h * src_w / src_h / 16.0 + 0.5) * 16;
 
     // Our copy of the VBS region (desktop duplication textures can't be used by the video processor directly)

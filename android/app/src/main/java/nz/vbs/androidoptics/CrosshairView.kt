@@ -40,11 +40,10 @@ class CrosshairView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         if (fovDeg <= 0f || videoWidth == 0 || videoHeight == 0) return
 
-        // The video is letterboxed to its shape (as VideoView draws it): work in that rectangle
+        // The video fills the screen keeping its shape (as VideoView draws it), cropped at two edges
         val videoAspect = videoWidth.toFloat() / videoHeight
         val viewAspect = width.toFloat() / height
-        val picW = if (viewAspect > videoAspect) height * videoAspect else width.toFloat()
-        val picH = if (viewAspect > videoAspect) height.toFloat() else width / videoAspect
+        val picW = if (viewAspect > videoAspect) width.toFloat() else height * videoAspect
         val cx = width / 2f
         val cy = height / 2f
 
@@ -54,9 +53,9 @@ class CrosshairView(context: Context) : View(context) {
         val radPerMil = 2 * Math.PI / 6400
         fun offsetPx(mils: Double) = (tan(mils * radPerMil) * scale).toFloat()
 
-        // Out to 60 mils, or the edge of the picture if that comes first (high zoom)
-        val edgeX = atan(tanHalfFov) / radPerMil
-        val edgeY = atan(tanHalfFov * picH / picW) / radPerMil
+        // Out to 60 mils, or the edge of the screen if that comes first (high zoom)
+        val edgeX = atan(width / 2.0 / scale) / radPerMil
+        val edgeY = atan(height / 2.0 / scale) / radPerMil
         for (n in 0..6) {
             val mils = n * 10.0
             val half = offsetPx(if (n % 2 == 0) 5.0 else 2.5) // long ticks 10 mils, short 5, centred on the axis

@@ -329,8 +329,6 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         }
         crosshair.visibility = if (v != null && v.framesDecoded > 0 && System.nanoTime() - v.lastFrameNs < 1_000_000_000L) View.VISIBLE else View.GONE
         if (v != null) crosshair.setOptics(ZOOMS[zoom].second, v.videoWidth, v.videoHeight)
-        val showingVideo = crosshair.visibility == View.VISIBLE && v != null
-        cornerMask.setVideoSize(if (showingVideo) v!!.videoWidth else 0, if (showingVideo) v!!.videoHeight else 0)
         val source = if (gyroMode) "Gyro: $trackingText  ($poseRate poses/s)" else "ARCore: $trackingText  ($poseRate poses/s, camera ${cameraFps} fps)"
         statusText.text = "$source\n$linkText\n$videoText"
     }

@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
-/** Shows the decoded VBS video, letterboxed to its shape. GL thread only. */
+/** Shows the decoded VBS video, filling the screen in its own shape. GL thread only. */
 class VideoView {
     lateinit var surface: Surface; private set
     private lateinit var surfaceTexture: SurfaceTexture
@@ -56,17 +56,17 @@ class VideoView {
         hasFrame = true
     }
 
-    /** Draws the frame letterboxed into the view */
+    /** Draws the frame filling the view, keeping its shape (the overflow is cropped, centred) */
     fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int) {
         if (!hasFrame || videoWidth == 0 || videoHeight == 0) return
         val videoAspect = videoWidth.toFloat() / videoHeight
         val viewAspect = viewWidth.toFloat() / viewHeight
         if (viewAspect > videoAspect) {
-            val w = (viewHeight * videoAspect).toInt()
-            GLES20.glViewport((viewWidth - w) / 2, 0, w, viewHeight)
-        } else {
             val h = (viewWidth / videoAspect).toInt()
             GLES20.glViewport(0, (viewHeight - h) / 2, viewWidth, h)
+        } else {
+            val w = (viewHeight * videoAspect).toInt()
+            GLES20.glViewport((viewWidth - w) / 2, 0, w, viewHeight)
         }
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)

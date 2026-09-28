@@ -55,8 +55,8 @@ const char* ENSURE_CAMERA_SQF =
     "vao_base = getDir vao_anchor; "
     "vao_ui_was_hidden = isUIHidden; "
     "vao_cam = \"camera\" camCreate (vao_anchor modelToWorld [0, 0.2, 1.7]); "
+    "showCinemaBorder false; "   // before cameraEffect, or VBS letterboxes the view
     "vao_cam cameraEffect [\"internal\", \"BACK\"]; "
-    "showCinemaBorder false; "
     "}; ";
 
 void release_view()
@@ -109,6 +109,16 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         realign = "vao_base = getDir vao_anchor; ";
     }
 
+    // The frustum's height must match the window's shape, or VBS keeps some other aspect and draws black bars.
+    // Checked every second or so in case the window is resized.
+    static double aspect = 0;
+    if (aspect <= 0 || steps % 60 == 0) {
+        double a = vbs_window_aspect();
+        if (a > 0) aspect = a;
+    }
+    double tan_half_h = tan(fov_deg * 3.14159265 / 360.0);
+    double tan_half_v = tan_half_h / (aspect > 0 ? aspect : 16.0 / 9.0);
+
     // Every step, once a mission is running: pick the anchor (the scenario may set var_ig later), make sure our
     // camera exists, keep the HUD hidden and the zoom set, follow the anchor and aim with the phone
     // (held at the last tracked direction while ARCore is not tracking)
@@ -116,13 +126,15 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
     sprintf_s(cmd,
         "if (!isNull player) then { "
         "%s%s%s"
-        "hideUI true; showHUD false; "
-        "setCamFrustum [true, %f]; "
-        "vao_cam camSetPos (vao_anchor modelToWorld [0, 0.2, 1.7]); vao_cam camCommit 0; "
+        "hideUI true; showHUD false; showCinemaBorder false; "
+        "setCamFrustum [true, %f, %f]; "
+        "vao_cam camSetPos (vao_anchor modelToWorld [0, 0.2, 1.7]); "
+        "vao_cam camSetFocus [-1, -1]; "   // no depth-of-field blur: everything in focus, like the eye
+        "vao_cam camCommit 0; "
         "setCamFrustumOffsets [true, vao_base + %.3f, %.3f, %.3f]; "
         "};",
         ANCHOR_SQF, ENSURE_CAMERA_SQF, realign,
-        tan(fov_deg * 3.14159265 / 360.0), phone.heading - heading_zero, phone.pitch, phone.roll);
+        tan_half_h, tan_half_v, phone.heading - heading_zero, phone.pitch, phone.roll);
     run(cmd);
 
     streamer_update(phone.ip);
