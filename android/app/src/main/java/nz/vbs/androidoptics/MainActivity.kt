@@ -60,6 +60,10 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     @Volatile private var gyroMode = true   // Tracking source: gyro, or ARCore when false
     @Volatile private var displayTurns = 1  // Screen rotation in quarter turns (device axes -> display axes)
     @Volatile private var lagFix = true
+    // Extra age added to each frame's pose for the lag fix: VBS queues frames before they reach the screen,
+    // and the phone takes a moment to show them. Raise it until the picture stops trailing while panning.
+    private val TRIMS_MS = listOf(0, 25, 50, 75, 100, 125, 150, 200)
+    @Volatile private var trim = 2
     @Volatile private var videoOn = true // Off: stop receiving/decoding and show the camera (what ARCore sees)
 
     // Zoom presets: name and horizontal field of view in degrees. The plugin sets VBS's view to match.
@@ -86,6 +90,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         zoom = prefs.getInt("zoom", 3).coerceIn(0, ZOOMS.size - 1)
         if (intent.getBooleanExtra("novideo", false)) videoOn = false // --ez novideo true: diagnostics
         gyroMode = prefs.getBoolean("gyroMode", true)
+        trim = prefs.getInt("lagTrim", 2).coerceIn(0, TRIMS_MS.size - 1)
 
         glView = GLSurfaceView(this).apply {
             preserveEGLContextOnPause = true
@@ -108,11 +113,11 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             imeOptions = EditorInfo.IME_ACTION_DONE
             isSingleLine = true
-            minEms = 9
+            minEms = 7
             setOnEditorActionListener { _, _, _ -> applyHost(); false }
         }
         val connectButton = Button(this).apply {
-            text = "Connect"
+            text = "Go"
             setOnClickListener { applyHost() }
         }
         val calibrateButton = Button(this).apply {
@@ -135,6 +140,14 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
                 text = if (lagFix) "Lag fix: on" else "Lag fix: off"
             }
         }
+        val trimButton = Button(this).apply {
+            text = "Trim ${TRIMS_MS[trim]}ms"
+            setOnClickListener {
+                trim = (trim + 1) % TRIMS_MS.size
+                prefs.edit().putInt("lagTrim", trim).apply()
+                text = "Trim ${TRIMS_MS[trim]}ms"
+            }
+        }
         val videoButton = Button(this).apply {
             text = "Video: on"
             setOnClickListener {
@@ -143,7 +156,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             }
         }
         val trackButton = Button(this).apply {
-            text = if (gyroMode) "Track: gyro" else "Track: ARCore"
+            text = if (gyroMode) "Gyro" else "ARCore"
             setOnClickListener {
                 prefs.edit().putBoolean("gyroMode", !gyroMode).apply()
                 recreate() // Starts or stops ARCore and the camera
@@ -159,6 +172,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(zoomButton)
             addView(videoButton)
             addView(lagFixButton)
+            addView(trimButton)
         }
         val overlay = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -405,11 +419,16 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
 
     /** Rotation (column-major, for the shader) from the current view to the view a frame was drawn with */
     private fun lagCorrection(poseSeq: Int?): FloatArray {
-        val then = poseSeq?.let { poseGyro[it] } ?: return Rot.IDENTITY
+        if (poseSeq == null) return Rot.IDENTITY
         // A frame drawn with an old pose means VBS is holding its view (e.g. ARCore not tracking):
         // turning the picture by everything since then would slide it away, so leave it
         val sent = poseSentNs[poseSeq] ?: return Rot.IDENTITY
         if (System.nanoTime() - sent > 400_000_000L) return Rot.IDENTITY
+        // Step back to the pose sent lag-trim earlier than the tagged one
+        val target = sent - TRIMS_MS[trim] * 1_000_000L
+        var s = poseSeq
+        while (s > poseSeq - 300 && (poseSentNs[s] ?: Long.MIN_VALUE) > target && poseGyro.containsKey(s - 1)) s--
+        val then = poseGyro[s] ?: return Rot.IDENTITY
         val now = gyro.latest() ?: return Rot.IDENTITY
         val a = Rot.quarterTurnsZ(if (gyroMode) displayTurns else axes.quarterTurns) // device axes -> display axes
         val turn = Rot.mul(Rot.transpose(then), now)                // now -> then, in device axes
