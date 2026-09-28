@@ -10,8 +10,9 @@ import kotlin.math.tan
 
 /**
  * Binocular graticule drawn over the VBS video (the app draws the optics overlay, so VBS needs no .pbo):
- * a vertical centre line, and along the horizontal centre a row of ticks every 10 NATO mils (6400 to a circle),
- * alternately 5 and 10 mils tall, with a tall tick in the centre.
+ * scales of ticks every 10 NATO mils (6400 to a circle), alternately 5 and 10 mils long, with a long tick at
+ * the centre. Horizontally they run 60 mils left and right; vertically 60 mils up from the centre, with the
+ * lower half left clear.
  *
  * Ticks are placed by angle through the same perspective VBS renders with, so they stay true at every zoom:
  * a direction [angle] off-centre lands tan(angle) / tan(fov / 2) of the half-width from the centre.
@@ -53,19 +54,21 @@ class CrosshairView(context: Context) : View(context) {
         val radPerMil = 2 * Math.PI / 6400
         fun offsetPx(mils: Double) = (tan(mils * radPerMil) * scale).toFloat()
 
-        // Vertical centre line
-        canvas.drawLine(cx, cy - picH / 2, cx, cy + picH / 2, line)
-
-        // Ticks every 10 mils out to the edge of the picture, alternately 5 and 10 mils tall, centred on the line
-        val edgeMils = atan(tanHalfFov) / radPerMil
-        var n = 0
-        while (n * 10.0 <= edgeMils) {
-            val half = offsetPx(if (n % 2 == 0) 5.0 else 2.5)
-            val dx = offsetPx(n * 10.0)
-            for (x in if (n == 0) listOf(cx) else listOf(cx - dx, cx + dx)) {
-                canvas.drawLine(x, cy - half, x, cy + half, line)
+        // Out to 60 mils, or the edge of the picture if that comes first (high zoom)
+        val edgeX = atan(tanHalfFov) / radPerMil
+        val edgeY = atan(tanHalfFov * picH / picW) / radPerMil
+        for (n in 0..6) {
+            val mils = n * 10.0
+            val half = offsetPx(if (n % 2 == 0) 5.0 else 2.5) // long ticks 10 mils, short 5, centred on the axis
+            val d = offsetPx(mils)
+            // Horizontal scale: upright ticks left and right of centre
+            if (mils <= edgeX) {
+                for (x in if (n == 0) listOf(cx) else listOf(cx - d, cx + d)) {
+                    canvas.drawLine(x, cy - half, x, cy + half, line)
+                }
             }
-            n++
+            // Vertical scale: level ticks going up from centre only
+            if (n > 0 && mils <= edgeY) canvas.drawLine(cx - half, cy - d, cx + half, cy - d, line)
         }
     }
 }
