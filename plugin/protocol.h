@@ -6,6 +6,8 @@
 //                      "adb reverse tcp:47830 tcp:47830" (USB). The PC acks every POSE_ACK_EVERY packets.
 // Video, PC -> phone:  UDP to <phone>:47831, one H.264 access unit split over packets. The phone asks for a
 //                      keyframe with a KeyRequest to the PC's port 47831. Video needs Wi-Fi (the phone's address).
+// Discovery:           the phone broadcasts a DiscoverRequest to UDP port 47830; every PC running the plugin
+//                      replies straight to the phone with a DiscoverReply. The replies' source addresses are the PCs.
 #include <cstdint>
 
 const int POSE_PORT = 47830;
@@ -45,9 +47,20 @@ struct KeyRequest {             // 8 bytes, phone -> PC
     char     magic[4];          // "VAK1"
     uint32_t last_frame;
 };
+struct DiscoverRequest {        // 8 bytes, phone -> broadcast
+    char     magic[4];          // "VAD1"
+    uint32_t reserved;
+};
+
+struct DiscoverReply {          // 36 bytes, PC -> phone
+    char     magic[4];          // "VAR1"
+    char     name[32];          // the PC's name, zero-terminated
+};
 #pragma pack(pop)
 
 static_assert(sizeof(PosePacket) == 36, "PosePacket layout");
 static_assert(sizeof(PoseAck) == 12, "PoseAck layout");
 static_assert(sizeof(VideoPacketHeader) == 16, "VideoPacketHeader layout");
 static_assert(sizeof(KeyRequest) == 8, "KeyRequest layout");
+static_assert(sizeof(DiscoverRequest) == 8, "DiscoverRequest layout");
+static_assert(sizeof(DiscoverReply) == 36, "DiscoverReply layout");

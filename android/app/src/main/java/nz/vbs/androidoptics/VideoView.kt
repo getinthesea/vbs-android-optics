@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
-/** Shows the decoded VBS video, filling the screen in its own shape. GL thread only. */
+/** Shows the decoded VBS video, filling the screen (or each half, for Cardboard) in its own shape. GL thread only. */
 class VideoView {
     lateinit var surface: Surface; private set
     private lateinit var surfaceTexture: SurfaceTexture
@@ -56,17 +56,32 @@ class VideoView {
         hasFrame = true
     }
 
-    /** Draws the frame filling the view, keeping its shape (the overflow is cropped, centred) */
-    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int) {
+    /**
+     * Draws the frame side by side [eyes] times (1, or 2 for Cardboard), each filling its share of the view
+     * and keeping its shape (the overflow is cropped, centred)
+     */
+    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int, eyes: Int = 1) {
         if (!hasFrame || videoWidth == 0 || videoHeight == 0) return
+        val eyeWidth = viewWidth / eyes
+        GLES20.glEnable(GLES20.GL_SCISSOR_TEST) // Keeps each eye's cropped overflow out of the other
+        for (eye in 0 until eyes) {
+            val left = eye * eyeWidth
+            GLES20.glScissor(left, 0, eyeWidth, viewHeight)
+            drawIn(left, eyeWidth, viewHeight, videoWidth, videoHeight)
+        }
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        GLES20.glViewport(0, 0, viewWidth, viewHeight)
+    }
+
+    private fun drawIn(left: Int, regionWidth: Int, regionHeight: Int, videoWidth: Int, videoHeight: Int) {
         val videoAspect = videoWidth.toFloat() / videoHeight
-        val viewAspect = viewWidth.toFloat() / viewHeight
-        if (viewAspect > videoAspect) {
-            val h = (viewWidth / videoAspect).toInt()
-            GLES20.glViewport(0, (viewHeight - h) / 2, viewWidth, h)
+        val regionAspect = regionWidth.toFloat() / regionHeight
+        if (regionAspect > videoAspect) {
+            val h = (regionWidth / videoAspect).toInt()
+            GLES20.glViewport(left, (regionHeight - h) / 2, regionWidth, h)
         } else {
-            val w = (viewHeight * videoAspect).toInt()
-            GLES20.glViewport((viewWidth - w) / 2, 0, w, viewHeight)
+            val w = (regionHeight * videoAspect).toInt()
+            GLES20.glViewport(left + (regionWidth - w) / 2, 0, w, regionHeight)
         }
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -79,7 +94,6 @@ class VideoView {
         GLES20.glEnableVertexAttribArray(position)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glDisableVertexAttribArray(position)
-        GLES20.glViewport(0, 0, viewWidth, viewHeight)
     }
 
     fun release() {

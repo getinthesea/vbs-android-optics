@@ -80,12 +80,24 @@ void udp_receiver()
         closesocket(s);
         return;
     }
+    // Discovery replies carry this PC's name, so the phone can tell PCs apart
+    DiscoverReply reply{};
+    memcpy(reply.magic, "VAR1", 4);
+    DWORD name_len = sizeof(reply.name);
+    if (!GetComputerNameA(reply.name, &name_len))
+        strcpy_s(reply.name, "VBS PC");
     while (running) {
-        PosePacket p;
+        char buffer[64];
         sockaddr_in from{};
         int from_len = sizeof(from);
-        int n = recvfrom(s, (char*)&p, sizeof(p), 0, (sockaddr*)&from, &from_len);
-        if (n != sizeof(p)) continue;
+        int n = recvfrom(s, buffer, sizeof(buffer), 0, (sockaddr*)&from, &from_len);
+        if (n == sizeof(DiscoverRequest) && memcmp(buffer, "VAD1", 4) == 0) {
+            sendto(s, (const char*)&reply, sizeof(reply), 0, (sockaddr*)&from, from_len);
+            continue;
+        }
+        if (n != sizeof(PosePacket)) continue;
+        PosePacket p;
+        memcpy(&p, buffer, sizeof(p));
         PoseAck ack;
         if (handle_packet(p, "wifi", from.sin_addr.s_addr, ack) && p.seq % POSE_ACK_EVERY == 0)
             sendto(s, (const char*)&ack, sizeof(ack), 0, (sockaddr*)&from, from_len);

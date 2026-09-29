@@ -2,6 +2,7 @@ package nz.vbs.androidoptics
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.opengl.GLES11Ext
@@ -38,6 +39,10 @@ import javax.microedition.khronos.opengles.GL10
  */
 class MainActivity : Activity(), GLSurfaceView.Renderer {
 
+    companion object {
+        const val AUTO = "auto" // Address that finds the VBS PC by itself
+    }
+
     private lateinit var glView: GLSurfaceView
     private lateinit var statusText: TextView
     private lateinit var hostField: EditText
@@ -47,6 +52,10 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     @Volatile private var session: Session? = null
     private var installRequested = false
     @Volatile private var link: PoseLink? = null
+    private var discovery: Discovery? = null   // Searching for VBS PCs (address "auto")
+    private var foundPc: Discovery.Pc? = null  // The PC "auto" connected to
+    private var linkStartMs = 0L
+    private var picker: AlertDialog? = null
 
     // GL thread state
     private val background = CameraBackground()
@@ -56,6 +65,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     @Volatile private var gyroMode = true   // Tracking source: gyro, or ARCore when false
     @Volatile private var displayTurns = 1  // Screen rotation in quarter turns (device axes -> display axes)
     @Volatile private var videoOn = true // Off: stop receiving/decoding and show the camera (what ARCore sees)
+    @Volatile private var cardboard = false // Google Cardboard: the video side by side, once per eye
 
     // Zoom presets: name and horizontal field of view in degrees. The plugin sets VBS's view to match.
     private val ZOOMS = listOf("1x" to 60f, "NVG" to 40f, "4x" to 15f, "7x binos" to 7.6f, "10x" to 5.5f, "15x" to 3.7f)
@@ -77,17 +87,20 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // "adb shell am start -n nz.vbs.androidoptics/.MainActivity --es host <PC IP or usb>" sets the link from a script
+        // "adb shell am start -n nz.vbs.androidoptics/.MainActivity --es host <auto, PC IP or usb>" sets the link from a script
         intent.getStringExtra("host")?.let { prefs.edit().putString("host", it).apply() }
         zoom = prefs.getInt("zoom", 3).coerceIn(0, ZOOMS.size - 1)
         if (intent.getBooleanExtra("novideo", false)) videoOn = false // --ez novideo true: diagnostics
         gyroMode = prefs.getBoolean("gyroMode", true)
+        cardboard = prefs.getBoolean("cardboard", false)
 
         glView = GLSurfaceView(this).apply {
             preserveEGLContextOnPause = true
             setEGLContextClientVersion(2)
             setRenderer(this@MainActivity)
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+            // In Cardboard the phone is out of reach: the viewer's button taps the screen, and that calibrates
+            setOnClickListener { if (cardboard) calibrate = (calibrate + 1) and 0xFF }
         }
 
         statusText = TextView(this).apply {
@@ -97,8 +110,8 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             setShadowLayer(6f, 0f, 0f, Color.BLACK) // Readable over the camera image
         }
         hostField = EditText(this).apply {
-            setText(prefs.getString("host", PoseLink.USB))
-            hint = "PC IP address, or usb"
+            setText(prefs.getString("host", AUTO))
+            hint = "auto, PC IP address, or usb"
             setTextColor(Color.BLACK)
             setHintTextColor(Color.DKGRAY)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -130,6 +143,15 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
                 text = if (videoOn) "Video: on" else "Video: off"
             }
         }
+        val cardboardButton = Button(this).apply {
+            text = if (cardboard) "View: Cardboard" else "View: single"
+            setOnClickListener {
+                cardboard = !cardboard
+                prefs.edit().putBoolean("cardboard", cardboard).apply()
+                text = if (cardboard) "View: Cardboard" else "View: single"
+                applyEyes()
+            }
+        }
         val trackButton = Button(this).apply {
             text = if (gyroMode) "Gyro" else "ARCore"
             setOnClickListener {
@@ -145,6 +167,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(trackButton)
             addView(zoomButton)
             addView(videoButton)
+            addView(cardboardButton)
         }
         // Everything but Calibrate lives in a panel behind the Stats button (top left), so the view stays clear
         val panel = LinearLayout(this).apply {
@@ -173,7 +196,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(statsButton, LinearLayout.LayoutParams(cornerW, cornerH))
             addView(panel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
-        for (b in listOf(statsButton, calibrateButton, connectButton, trackButton, zoomButton, videoButton)) styleButton(b)
+        for (b in listOf(statsButton, calibrateButton, connectButton, trackButton, zoomButton, videoButton, cardboardButton)) styleButton(b)
         for (b in listOf(statsButton, calibrateButton)) {
             b.textSize = 10f
             b.setPadding(0, 0, 0, 0)
@@ -185,6 +208,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         statsButton.layoutParams = LinearLayout.LayoutParams(cornerW, cornerH) // styleButton reset it
         crosshair = CrosshairView(this).apply { visibility = View.GONE }
         cornerMask = CornerMaskView(this)
+        applyEyes()
         setContentView(FrameLayout(this).apply {
             addView(glView)
             addView(cornerMask)
@@ -246,8 +270,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         glView.onPause()
         gyro.stop()
         session?.pause()
-        link?.close()
-        link = null
+        stopLink()
         videoStream?.close()
         videoStream = null
     }
@@ -289,15 +312,74 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         frames++
     }
 
+    /** Overlays follow the video: one picture, or one per eye for Cardboard */
+    private fun applyEyes() {
+        val eyes = if (cardboard) 2 else 1
+        crosshair.eyes = eyes
+        cornerMask.eyes = eyes
+    }
+
     private fun applyHost() {
-        prefs.edit().putString("host", hostField.text.toString().trim().ifEmpty { PoseLink.USB }).apply()
+        prefs.edit().putString("host", hostField.text.toString().trim().ifEmpty { AUTO }).apply()
         startLink()
         hideSystemUi()
     }
 
     private fun startLink() {
+        stopLink()
+        val host = prefs.getString("host", AUTO) ?: AUTO
+        if (host.equals(AUTO, ignoreCase = true)) discovery = Discovery()
+        else link = PoseLink(host)
+        linkStartMs = System.currentTimeMillis()
+    }
+
+    private fun stopLink() {
         link?.close()
-        link = PoseLink(prefs.getString("host", PoseLink.USB) ?: PoseLink.USB)
+        link = null
+        discovery?.close()
+        discovery = null
+        foundPc = null
+        picker?.dismiss()
+        picker = null
+    }
+
+    /**
+     * Address "auto": once a PC answers, wait a moment for any others. One PC: connect to it. More: ask which.
+     * If the PC stops answering (VBS closed, new address), search again.
+     */
+    private fun checkDiscovery(now: Long) {
+        val d = discovery
+        if (d == null) {
+            val l = link
+            if (foundPc != null && l != null && now - maxOf(l.lastAckMs, linkStartMs) > 5000) startLink()
+            return
+        }
+        val found = d.found
+        if (found.isEmpty() || now - d.firstReplyMs < 1500 || picker != null) return
+        d.close()
+        discovery = null
+        if (found.size == 1) {
+            connectTo(found[0])
+            return
+        }
+        val sorted = found.sortedBy { it.name.lowercase() }
+        picker = AlertDialog.Builder(this)
+            .setTitle("Which VBS PC?")
+            .setItems(sorted.map { "${it.name}  (${it.address})" }.toTypedArray()) { _, i -> connectTo(sorted[i]) }
+            .setNegativeButton("Search again") { _, _ -> startLink() }
+            .setCancelable(false)
+            .create()
+            .apply {
+                setOnDismissListener { picker = null; hideSystemUi() }
+                show()
+            }
+    }
+
+    private fun connectTo(pc: Discovery.Pc) {
+        link?.close()
+        link = PoseLink(pc.address)
+        foundPc = pc
+        linkStartMs = System.currentTimeMillis()
     }
 
     private var lastFrames = 0
@@ -311,9 +393,18 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             lastFrames = frames
             lastRateCheck = now
         }
+        checkDiscovery(now)
         val l = link
+        val d = discovery
+        val pc = foundPc
         val linkText = when {
+            d?.error != null -> d.error
+            d != null && d.found.isEmpty() -> "auto: searching Wi-Fi for VBS (VBS running, phone on the same network?)"
+            d != null -> "auto: found ${d.found.size} PC(s)..."
             l == null -> "not connected"
+            pc != null && l.lastAckMs == 0L -> "auto: ${pc.name} (${pc.address}), no reply from PC yet"
+            pc != null && now - l.lastAckMs > 1000 -> "auto: ${pc.name} (${pc.address}) NOT RECEIVING (last reply ${(now - l.lastAckMs) / 1000} s ago)"
+            pc != null -> "auto: ${pc.name} (${pc.address}) receiving (${l.pcReceived} poses)"
             l.error != null -> l.error
             l.lastAckMs == 0L -> "${l.host}: sent ${l.sent.get()}, no reply from PC yet"
             now - l.lastAckMs > 1000 -> "${l.host}: PC NOT RECEIVING (last reply ${(now - l.lastAckMs) / 1000} s ago)"
@@ -398,7 +489,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         val stream = videoStream
         v?.update()
         if (v != null && stream != null && System.nanoTime() - stream.lastFrameNs < 1_000_000_000L) {
-            v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight)
+            v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, if (cardboard) 2 else 1)
         } else if (frame != null) {
             background.draw(frame)
         }

@@ -24,7 +24,8 @@ The crosshair (and later any reticles) is drawn by the app.
 
 | Link | Tracking | Video | How |
 |---|---|---|---|
-| Wi-Fi | UDP 47830 | UDP 47831 | Type the VBS PC's IP address into the app |
+| Wi-Fi, found automatically | UDP 47830 | UDP 47831 | Leave the address as `auto` (the default). With more than one VBS PC on the network, the app asks which one |
+| Wi-Fi, fixed address | UDP 47830 | UDP 47831 | Type the VBS PC's IP address into the app |
 | USB | TCP 47830 via `adb reverse` | not yet | Leave the address as `usb` and run `android\install.ps1` |
 
 VBS (`VBS3_64.exe`) needs inbound UDP allowed through Windows Firewall. The VBS installer normally adds this rule.
@@ -42,6 +43,8 @@ android\install.ps1         # app -> the USB-connected phone
 ```
 
 Hold the phone like a camera: landscape, with the screen towards you. Face the way you want as forward and press **Calibrate**.
+
+For Google Cardboard, set **View: Cardboard** in Settings (remembered). The video, crosshair and rounded mask are shown once per eye, side by side. The same picture goes to both eyes, and there is no lens-distortion correction. With the phone in the viewer, pressing the viewer's button (any tap on the picture) calibrates.
 
 ## Tracking
 

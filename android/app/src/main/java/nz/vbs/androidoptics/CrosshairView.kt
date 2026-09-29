@@ -37,10 +37,26 @@ class CrosshairView(context: Context) : View(context) {
         invalidate()
     }
 
+    /** 1, or 2 for Cardboard: a graticule centred in each half of the screen */
+    var eyes = 1
+        set(value) {
+            if (field != value) { field = value; invalidate() }
+        }
+
     override fun onDraw(canvas: Canvas) {
         if (fovDeg <= 0f || videoWidth == 0 || videoHeight == 0) return
+        val eyeWidth = width / eyes
+        for (eye in 0 until eyes) {
+            canvas.save()
+            canvas.clipRect(eye * eyeWidth, 0, (eye + 1) * eyeWidth, height)
+            canvas.translate((eye * eyeWidth).toFloat(), 0f)
+            drawGraticule(canvas, eyeWidth, height)
+            canvas.restore()
+        }
+    }
 
-        // The video fills the screen keeping its shape (as VideoView draws it), cropped at two edges
+    private fun drawGraticule(canvas: Canvas, width: Int, height: Int) {
+        // The video fills its area keeping its shape (as VideoView draws it), cropped at two edges
         val videoAspect = videoWidth.toFloat() / videoHeight
         val viewAspect = width.toFloat() / height
         val picW = if (viewAspect > videoAspect) width.toFloat() else height * videoAspect
