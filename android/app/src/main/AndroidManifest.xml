@@ -8,6 +8,7 @@
 
     <application
         android:label="VBS Android Optics"
+        android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 
