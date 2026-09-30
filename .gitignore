@@ -12,3 +12,6 @@ android/build/
 android/app/build/
 android/local.properties
 android/.idea/
+
+# Godot
+dagr/.godot/

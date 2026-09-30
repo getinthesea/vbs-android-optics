@@ -3,20 +3,25 @@
 // While the VBS Android Optics app is connected, this plugin:
 //   - looks through its own camera at the anchor's eye, aimed by the phone (heading relative to where the
 //     anchor faced when the phone connected or Calibrate was pressed; pitch and roll from gravity). The anchor
-//     is var_ig if the scenario sets it (e.g. JFSim's observation post), else a unit named ig2 or projector,
-//     else the player,
+//     is var_ig if the scenario sets it (e.g. JFSim's observation post), else a unit named igl, ig2 or
+//     projector, else the player (anchor.h),
 //   - hides VBS's HUD (weapon status, crosshair, action menu) and restores it afterwards,
 //   - sets the field of view the phone asks for (its zoom presets),
 //   - streams the VBS window to the phone.
 // When the phone stops sending for a few seconds, the normal view is handed back. No SQF or .pbo is needed.
+// It also feeds the DAGR app (dagr/, installed in plugins64\vbs-android-optics) whether or not a phone is connected,
+// and starts it once per mission on the PC the phone is connected to.
 //
 //   pluginFunction ["VBSAndroidOptics", "status"]  -> ["one line report"]
+//   pluginFunction ["VBSAndroidOptics", "dagr"]    -> ["what the DAGR app is being sent"]
 #include <winsock2.h>
 #include <windows.h>
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include "vbs_plugin.h"
+#include "anchor.h"
+#include "dagr.h"
 #include "phone_link.h"
 #include "streamer.h"
 
@@ -39,13 +44,6 @@ void run(const char* sqf)
 {
     if (ExecuteCommand) ExecuteCommand(sqf, nullptr, 0);
 }
-
-// Picks the anchor for the view: var_ig (the scenario's observation post), ig2, projector, else the player
-const char* ANCHOR_SQF =
-    "vao_anchor = player; "
-    "if (!isNil \"projector\") then { if (!isNull projector) then { vao_anchor = projector; }; }; "
-    "if (!isNil \"ig2\") then { if (!isNull ig2) then { vao_anchor = ig2; }; }; "
-    "if (!isNil \"var_ig\") then { if (!isNull var_ig) then { vao_anchor = var_ig; }; }; ";
 
 // Our camera at the anchor's eye (vao_* variables are ours). Created whenever it is missing, not once: the phone
 // can connect before a mission has loaded, and a mission restart destroys the camera.
@@ -78,10 +76,12 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
     if (!ExecuteCommand) return;
     phone_link_start();
     streamer_start();
+    dagr_start();
     steps++;
 
     PhoneState phone = phone_link_read();
     bool connected = phone.age_ms >= 0 && phone.age_ms < LOST_AFTER_MS;
+    dagr_update((void*)ExecuteCommand, connected); // The PC showing the binos also shows the DAGR
 
     if (!connected) {
         if (active) {
@@ -152,8 +152,11 @@ VBS_PLUGIN_EXPORT const char* WINAPI PluginFunction(const char* input)
             p.tracking ? "yes" : "no", p.heading - heading_zero, p.pitch, p.roll, fov_deg, streamer_status().c_str());
         text = buf;
     }
+    else if (input && std::string(input) == "dagr") {
+        text = dagr_status();
+    }
     else {
-        text = "error: the only command is \"status\"";
+        text = "error: the commands are \"status\" and \"dagr\"";
     }
     // VBS evaluates the reply as SQF and pluginFunction returns an array, so reply ["..."]
     reply = "[\"";
@@ -167,6 +170,7 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID)
     if (reason == DLL_PROCESS_DETACH) {
         streamer_stop();
         phone_link_stop();
+        dagr_stop();
     }
     return TRUE;
 }

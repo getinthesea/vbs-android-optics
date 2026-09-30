@@ -9,6 +9,7 @@ streamed back to the phone's screen. It is one plugin DLL and one app, with no S
 |---|---|
 | `plugin/` | `VBSAndroidOptics.dll`, a VBS3 plugin (`plugins64`) |
 | `android/` | The VBS Android Optics app (Kotlin) |
+| `dagr/` | The DAGR app (Godot 4.7), `plugins64\vbs-android-optics\dagr.exe` |
 
 While the app is connected, the plugin does the following:
 - **Camera:** looks through its own camera at the player's eye, aimed by the phone.
@@ -19,6 +20,31 @@ While the app is connected, the plugin does the following:
 - **Hand-back:** when the phone stops sending for 3 s, the normal VBS view comes back.
 
 The crosshair (and later any reticles) is drawn by the app.
+
+The view looks from the observer: `var_ig` if the scenario sets it (JFSim's OP, where JFSim's binos also look
+from), else a unit named `igl`, `ig2` or `projector`, else the player.
+
+## DAGR
+
+`dagr.exe` shows a DAGR for the same observer, whether or not a phone is connected. The plugin reads VBS four
+times a second, and the app asks it over UDP 47840: this PC first, else a broadcast on the network.
+
+The plugin starts `dagr.exe` on the PC the phone is connected to (the one showing the binos), once a mission is
+running and a phone is connected. It does this once per mission, and not if the DAGR is already open, so closing
+it keeps it closed until the next mission. It can also be started by hand on any PC.
+
+| Field | From |
+|---|---|
+| MGRS | The observer's 10-figure grid |
+| Date | Today, from the PC clock (DD-MM-YY) |
+| Time | Scenario time (`daytime`) |
+| Elevation | Terrain height at the grid (`getTerrainHeightASL`) |
+| Accuracy | Always +/- 7m |
+| Battery Locations | The first 5 of the units `G1`-`G9` that exist, as 6-figure grids. With none, the heading is hidden too |
+| Compass MV | `getDeclination`, in mils |
+
+The figures match JFSim's own DAGR (`dagr.sqf`). With no VBS or no mission running, the app shows dashes.
+To see what the app is being sent, run `(pluginFunction ["VBSAndroidOptics", "dagr"]) select 0` in the debug console.
 
 ## Connecting
 
@@ -34,12 +60,12 @@ To debug from the VBS debug console, run `(pluginFunction ["VBSAndroidOptics", "
 
 ## Build and install
 
-Close VBS first, because it locks plugin DLLs.
+Close VBS and the DAGR app first, because they lock their files.
 
 ```powershell
-.\build.ps1                 # plugin (VS 2022) and app (Android SDK, JDK 17)
-.\deploy.ps1                # VBSAndroidOptics.dll -> D:\VBS3\plugins64
-android\install.ps1         # app -> the USB-connected phone
+.\build.ps1                 # plugin (VS 2022), DAGR app (Godot 4.7.2 + export templates), phone app (Android SDK, JDK 17)
+.\deploy.ps1                # VBSAndroidOptics.dll -> D:\VBS3\plugins64, dagr.exe + .pck -> plugins64\vbs-android-optics
+android\install.ps1         # phone app -> the USB-connected phone
 ```
 
 Hold the phone like a camera: landscape, with the screen towards you. Face the way you want as forward and press **Calibrate**.

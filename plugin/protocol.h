@@ -8,10 +8,13 @@
 //                      keyframe with a KeyRequest to the PC's port 47831. Video needs Wi-Fi (the phone's address).
 // Discovery:           the phone broadcasts a DiscoverRequest to UDP port 47830; every PC running the plugin
 //                      replies straight to the phone with a DiscoverReply. The replies' source addresses are the PCs.
+// DAGR, app <-> PC:    the DAGR app (dagr/) sends "VDG1" to UDP 47840 (this PC, or broadcast); the plugin replies with
+//                      its latest reading as one line of JSON (dagr.cpp).
 #include <cstdint>
 
 const int POSE_PORT = 47830;
 const int VIDEO_PORT = 47831;
+const int DAGR_PORT = 47840;
 const int POSE_ACK_EVERY = 10;
 const int VIDEO_PAYLOAD = 1200;
 

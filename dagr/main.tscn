@@ -1,0 +1,213 @@
+[gd_scene format=3 uid="uid://cilovsemvjocv"]
+
+[ext_resource type="Texture2D" uid="uid://dofa8n31qrpw5" path="res://jfs_dagr.png" id="1_0xm2m"]
+[ext_resource type="FontFile" uid="uid://degu2kiwn06oy" path="res://Jersey_10/Jersey10-Regular.ttf" id="2_h2yge"]
+[ext_resource type="Script" path="res://main.gd" id="3_dagr"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_qmjb4"]
+bg_color = Color(0, 0, 0, 1)
+
+[node name="Main" type="Control" unique_id=760327422]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("3_dagr")
+
+[node name="Panel" type="Panel" parent="." unique_id=2028605658]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_qmjb4")
+
+[node name="DAGRTexture" type="TextureRect" parent="." unique_id=1976172036]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 61.0
+offset_top = -918.0
+offset_right = 847.0
+grow_vertical = 0
+texture = ExtResource("1_0xm2m")
+
+[node name="MGRS-New WGD" type="Label" parent="." unique_id=1555985388]
+layout_mode = 0
+offset_left = 179.0
+offset_top = 385.0
+offset_right = 724.0
+offset_bottom = 420.0
+theme_override_colors/font_color = Color(0, 0, 0, 0.5019608)
+theme_override_constants/line_spacing = -39
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 32
+text = " MGRS-New	WGD"
+horizontal_alignment = 3
+
+[node name="DateLabel" type="Label" parent="." unique_id=960143744]
+layout_mode = 0
+offset_left = 179.0
+offset_top = 560.0
+offset_right = 237.0
+offset_bottom = 595.0
+theme_override_colors/font_color = Color(0, 0, 0, 0.5019608)
+theme_override_constants/line_spacing = -39
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 32
+text = " Date"
+horizontal_alignment = 3
+
+[node name="TimeLabel" type="Label" parent="." unique_id=1408940068]
+layout_mode = 0
+offset_left = 459.0
+offset_top = 560.0
+offset_right = 516.0
+offset_bottom = 595.0
+theme_override_colors/font_color = Color(0, 0, 0, 0.5019608)
+theme_override_constants/line_spacing = -39
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 32
+text = " Time"
+horizontal_alignment = 3
+
+[node name="ElevationLabel" type="Label" parent="." unique_id=69863135]
+layout_mode = 0
+offset_left = 179.0
+offset_top = 651.0
+offset_right = 287.0
+offset_bottom = 686.0
+theme_override_colors/font_color = Color(0, 0, 0, 0.5019608)
+theme_override_constants/line_spacing = -39
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 32
+text = " Elevation"
+horizontal_alignment = 3
+
+[node name="AccuracyLabel" type="Label" parent="." unique_id=1565158881]
+layout_mode = 0
+offset_left = 459.0
+offset_top = 652.0
+offset_right = 572.0
+offset_bottom = 687.0
+theme_override_colors/font_color = Color(0, 0, 0, 0.5019608)
+theme_override_constants/line_spacing = -39
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 32
+text = " Accuracy"
+horizontal_alignment = 3
+
+[node name="MGRS" type="Label" parent="." unique_id=732516320]
+layout_mode = 0
+offset_left = 179.0
+offset_top = 393.0
+offset_right = 729.0
+offset_bottom = 559.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_constants/line_spacing = 0
+theme_override_constants/paragraph_spacing = -32
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 92
+text = "60H UB 12345 e 
+65789 n "
+horizontal_alignment = 2
+vertical_alignment = 2
+
+[node name="Date" type="Label" parent="." unique_id=36692147]
+layout_mode = 0
+offset_left = 179.0
+offset_top = 573.0
+offset_right = 450.0
+offset_bottom = 643.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_constants/line_spacing = 0
+theme_override_constants/paragraph_spacing = -32
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 64
+text = "01-02-26"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Time" type="Label" parent="." unique_id=1853315539]
+layout_mode = 0
+offset_left = 458.0
+offset_top = 573.0
+offset_right = 729.0
+offset_bottom = 643.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_constants/line_spacing = 0
+theme_override_constants/paragraph_spacing = -32
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 64
+text = "12:34:56"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Elevation" type="Label" parent="." unique_id=679158685]
+layout_mode = 0
+offset_left = 179.0
+offset_top = 664.0
+offset_right = 450.0
+offset_bottom = 734.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_constants/line_spacing = 0
+theme_override_constants/paragraph_spacing = -32
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 64
+text = "123 m"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Accuracy" type="Label" parent="." unique_id=1205024444]
+layout_mode = 0
+offset_left = 459.0
+offset_top = 664.0
+offset_right = 729.0
+offset_bottom = 734.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_constants/line_spacing = 0
+theme_override_constants/paragraph_spacing = -32
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 64
+text = "+/- 7m"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Battery Locations" type="Label" parent="." unique_id=21623590]
+layout_mode = 1
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = -720.0
+offset_top = -485.0
+offset_right = -30.0
+offset_bottom = 485.0
+grow_horizontal = 0
+grow_vertical = 2
+offset_transform_enabled = true
+theme_override_colors/font_color = Color(0.627451, 0.59607846, 0.41960785, 1)
+theme_override_constants/line_spacing = 0
+theme_override_constants/paragraph_spacing = -32
+theme_override_fonts/font = ExtResource("2_h2yge")
+theme_override_font_sizes/font_size = 92
+text = "Battery Locations: 
+
+C/S 1: 60H UB 979 313 
+
+C/S 2: 60H UB 123 456 
+
+C/S 3: 60H UB 979 313 
+
+C/S 4: 60H UB 979 313 
+
+C/S 5: 60H UB 979 313 
+
+
+Compass MV: 350 mils "
+horizontal_alignment = 1
