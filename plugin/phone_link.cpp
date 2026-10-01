@@ -24,15 +24,19 @@ bool      filt_initialized = false;
 PhoneState latest;
 ULONGLONG last_packet_ms = 0;
 ULONGLONG last_tracking_ms = 0;
+char      lrf_left[8] = {}, lrf_right[8] = {};
+bool      lrf_mark = false;
+uint32_t  lrf_version = 0;       // bumped when the display changes
 
 // ARCore is already smooth; this only takes the edge off network jitter
 const double SMOOTHING = 0.5;
 const double DEAD_ZONE_DEG = 0.02;
 
-// Returns the ack to send back, or false if the packet is not ours
-bool handle_packet(const PosePacket& p, const char* link, uint32_t ip, PoseAck& ack)
+// Returns the ack to send back, or false if the packet is not ours. send_now: the rangefinder display changed
+// since sent_version, so ack straight away rather than waiting for the next POSE_ACK_EVERY
+bool handle_packet(const PosePacket& p, const char* link, uint32_t ip, PoseAck& ack, uint32_t& sent_version, bool& send_now)
 {
-    if (memcmp(p.magic, "VAO1", 4) != 0)
+    if (memcmp(p.magic, "VAO2", 4) != 0)
         return false;
 
     std::lock_guard<std::mutex> lock(state_mutex);
@@ -44,6 +48,7 @@ bool handle_packet(const PosePacket& p, const char* link, uint32_t ip, PoseAck& 
     latest.tracking = p.tracking != 0;
     latest.calibrate = p.calibrate;
     latest.fov_deg = p.fov_cdeg / 100.0f;
+    latest.buttons = p.buttons;
 
     if (p.tracking) {
         Quat q{ p.qw, p.qx, p.qy, p.qz };
@@ -60,9 +65,15 @@ bool handle_packet(const PosePacket& p, const char* link, uint32_t ip, PoseAck& 
         last_tracking_ms = now;
     }
 
-    memcpy(ack.magic, "VAA1", 4);
+    memset(&ack, 0, sizeof(ack));
+    memcpy(ack.magic, "VAA2", 4);
     ack.seq = p.seq;
     ack.received = latest.packets;
+    memcpy(ack.lrf_left, lrf_left, sizeof(lrf_left));
+    memcpy(ack.lrf_right, lrf_right, sizeof(lrf_right));
+    ack.lrf_mark = lrf_mark ? 1 : 0;
+    send_now = sent_version != lrf_version;
+    sent_version = lrf_version;
     return true;
 }
 
@@ -86,6 +97,7 @@ void udp_receiver()
     DWORD name_len = sizeof(reply.name);
     if (!GetComputerNameA(reply.name, &name_len))
         strcpy_s(reply.name, "VBS PC");
+    uint32_t sent_version = 0;
     while (running) {
         char buffer[64];
         sockaddr_in from{};
@@ -99,7 +111,8 @@ void udp_receiver()
         PosePacket p;
         memcpy(&p, buffer, sizeof(p));
         PoseAck ack;
-        if (handle_packet(p, "wifi", from.sin_addr.s_addr, ack) && p.seq % POSE_ACK_EVERY == 0)
+        bool send_now = false;
+        if (handle_packet(p, "wifi", from.sin_addr.s_addr, ack, sent_version, send_now) && (send_now || p.seq % POSE_ACK_EVERY == 0))
             sendto(s, (const char*)&ack, sizeof(ack), 0, (sockaddr*)&from, from_len);
     }
     closesocket(s);
@@ -133,6 +146,7 @@ void tcp_receiver()
 
         char buffer[sizeof(PosePacket)];
         int filled = 0;
+        uint32_t sent_version = 0;
         while (running) {
             int n = recv(client, buffer + filled, sizeof(buffer) - filled, 0);
             if (n == 0) break;
@@ -146,8 +160,9 @@ void tcp_receiver()
             PosePacket p;
             memcpy(&p, buffer, sizeof(p));
             PoseAck ack;
-            if (!handle_packet(p, "usb", 0, ack)) break; // Out of step with the stream: drop the connection
-            if (p.seq % POSE_ACK_EVERY == 0)
+            bool send_now = false;
+            if (!handle_packet(p, "usb", 0, ack, sent_version, send_now)) break; // Out of step with the stream: drop the connection
+            if (send_now || p.seq % POSE_ACK_EVERY == 0)
                 send(client, (const char*)&ack, sizeof(ack), 0);
         }
         closesocket(client);
@@ -173,6 +188,19 @@ void phone_link_stop()
     running = false;
     if (udp_thread.joinable()) udp_thread.detach();
     if (tcp_thread.joinable()) tcp_thread.detach();
+}
+
+void phone_link_set_lrf(const std::string& left, const std::string& right, bool mark)
+{
+    std::lock_guard<std::mutex> lock(state_mutex);
+    char l[8] = {}, r[8] = {};
+    strncpy_s(l, left.c_str(), _TRUNCATE);
+    strncpy_s(r, right.c_str(), _TRUNCATE);
+    if (memcmp(l, lrf_left, 8) == 0 && memcmp(r, lrf_right, 8) == 0 && mark == lrf_mark) return;
+    memcpy(lrf_left, l, 8);
+    memcpy(lrf_right, r, 8);
+    lrf_mark = mark;
+    lrf_version++;
 }
 
 PhoneState phone_link_read()

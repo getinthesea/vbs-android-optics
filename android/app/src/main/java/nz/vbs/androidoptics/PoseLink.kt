@@ -22,29 +22,37 @@ class PoseLink(val host: String) {
     companion object {
         const val PORT = 47830
         const val USB = "usb"
-        private const val PACKET_SIZE = 36
-        private const val ACK_SIZE = 12
+        private const val PACKET_SIZE = 40
+        private const val ACK_SIZE = 32
     }
 
     val sent = AtomicInteger()
     @Volatile var pcReceived = 0; private set
     @Volatile var lastAckMs = 0L; private set
     @Volatile var error: String? = null; private set
+    // The rangefinder display the PC sends back in its acks (plugin/lrf.cpp)
+    @Volatile var lrfLeft = ""; private set
+    @Volatile var lrfRight = ""; private set
+    @Volatile var lrfMark = false; private set
 
     private val queue = ArrayBlockingQueue<ByteArray>(4)
     @Volatile private var running = true
     private val thread = Thread({ if (host == USB) runTcp() else runUdp() }, "PoseLink").apply { start() }
 
-    /** q is ARCore's rotationQuaternion: x, y, z, w; fovDeg is the wanted horizontal field of view */
-    fun send(seq: Int, timestampNs: Long, q: FloatArray, tracking: Boolean, calibrate: Int, fovDeg: Float) {
+    /**
+     * q is ARCore's rotationQuaternion: x, y, z, w; fovDeg is the wanted horizontal field of view;
+     * buttons are held now: bit 0 Bearing, bit 1 Range
+     */
+    fun send(seq: Int, timestampNs: Long, q: FloatArray, tracking: Boolean, calibrate: Int, fovDeg: Float, buttons: Int) {
         val buf = ByteBuffer.allocate(PACKET_SIZE).order(ByteOrder.LITTLE_ENDIAN)
-        buf.put("VAO1".toByteArray(Charsets.US_ASCII))
+        buf.put("VAO2".toByteArray(Charsets.US_ASCII))
         buf.putInt(seq)
         buf.putLong(timestampNs)
         buf.putFloat(q[0]).putFloat(q[1]).putFloat(q[2]).putFloat(q[3])
         buf.put((if (tracking) 1 else 0).toByte())
         buf.put(calibrate.toByte())
         buf.putShort((fovDeg * 100).toInt().coerceIn(0, 65535).toShort())
+        buf.put(buttons.toByte())
         // Keep only the newest poses if the network falls behind
         while (!queue.offer(buf.array())) queue.poll()
     }
@@ -55,9 +63,12 @@ class PoseLink(val host: String) {
     }
 
     private fun onAck(b: ByteArray) {
-        if (String(b, 0, 4, Charsets.US_ASCII) != "VAA1") return
+        if (String(b, 0, 4, Charsets.US_ASCII) != "VAA2") return
         pcReceived = ByteBuffer.wrap(b, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
         lastAckMs = System.currentTimeMillis()
+        lrfLeft = String(b, 12, 8, Charsets.US_ASCII).substringBefore('\u0000')
+        lrfRight = String(b, 20, 8, Charsets.US_ASCII).substringBefore('\u0000')
+        lrfMark = b[28].toInt() != 0
     }
 
     private fun runUdp() {

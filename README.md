@@ -24,6 +24,23 @@ The crosshair (and later any reticles) is drawn by the app.
 The view looks from the observer: `var_ig` if the scenario sets it (JFSim's OP, where JFSim's binos also look
 from), else a unit named `igl`, `ig2` or `projector`, else the player.
 
+## Rangefinder (Vector)
+
+The **Bearing** and **Range** buttons in the phone's bottom corners work like the Vector's two buttons (JFSim's
+`vector.sqf`). The readouts show in red below the centre of the view.
+
+| Press | Shows |
+|---|---|
+| Bearing | Grid bearing in mils, to the 5 below |
+| Bearing, again within 3 s | Bearing, and the vertical angle in mils. Locked until the display clears |
+| Range | Range in metres. After Bearing, Range is ignored until the display clears |
+| Range, again within 3 s | Range, and the difference in altitude (target minus observer, m). Locked until it clears |
+| Both together | Bearing and range. JFSim's DAGR and this project's DAGR show the target (LRF TGT MODE) |
+
+The display clears 4 s after the last press. Ranges beyond 8000 m or under 5 m read `- - - -`. The range is to
+the ground at the centre of the view; buildings and trees are not seen, as with `vector.sqf`. Each lase is
+published as `vector_aim_point` for JFSim's instructor app, and JFSim's LRF-disable switch is honoured.
+
 ## DAGR
 
 `dagr.exe` shows a DAGR for the same observer, whether or not a phone is connected. The plugin reads VBS four
@@ -44,6 +61,8 @@ it keeps it closed until the next mission. It can also be started by hand on any
 | Compass MV | `getDeclination`, in mils |
 
 The figures match JFSim's own DAGR (`dagr.sqf`). With no VBS or no mission running, the app shows dashes.
+After a lase with both rangefinder buttons it shows the target, as JFSim's DAGR does (grid, Dn, Dist and DifAlt,
+observer minus target), until the observer moves.
 To see what the app is being sent, run `(pluginFunction ["VBSAndroidOptics", "dagr"]) select 0` in the debug console.
 
 ## Connecting

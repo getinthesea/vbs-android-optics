@@ -61,10 +61,12 @@
     <ClInclude Include="streamer.h" />
     <ClInclude Include="anchor.h" />
     <ClInclude Include="dagr.h" />
+    <ClInclude Include="lrf.h" />
     <ClCompile Include="plugin.cpp" />
     <ClCompile Include="phone_link.cpp" />
     <ClCompile Include="streamer.cpp" />
     <ClCompile Include="dagr.cpp" />
+    <ClCompile Include="lrf.cpp" />
     <None Include="VBSAndroidOptics.def" />
     <None Include="orientation_test.cpp" />
   </ItemGroup>

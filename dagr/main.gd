@@ -12,6 +12,10 @@ var udp := PacketPeerUDP.new()
 var vbs_address := ""           # The VBS PC that answered ("" = searching)
 var last_reply_ms := -LOST_AFTER_MS
 var poll_timer := 0.0
+# JFSim's DAGR target mode: after a lase with both rangefinder buttons on the phone, until the observer moves
+var last_target_id := -1        # Of the plugin's last lase (-1: not seen a reading yet)
+var target := {}                # The lase being shown ({} = normal display)
+var target_observer := ""       # The observer's grid when it was lased
 
 @onready var mgrs_label: Label = $MGRS
 @onready var date_label: Label = $Date
@@ -19,12 +23,15 @@ var poll_timer := 0.0
 @onready var elevation_label: Label = $Elevation
 @onready var accuracy_label: Label = $Accuracy
 @onready var battery_label: Label = $"Battery Locations"
+@onready var header_label: Label = $"MGRS-New WGD"
+@onready var date_caption: Label = $DateLabel
+@onready var elevation_caption: Label = $ElevationLabel
+@onready var accuracy_caption: Label = $AccuracyLabel
 
 
 func _ready() -> void:
 	udp.set_broadcast_enabled(true)
 	udp.bind(0)
-	accuracy_label.text = "+/- 7m"
 	show_no_reading()
 	come_to_front()
 
@@ -36,7 +43,8 @@ func come_to_front() -> void:
 
 
 func _process(delta: float) -> void:
-	date_label.text = today()
+	if target.is_empty():
+		date_label.text = today()
 	poll_timer -= delta
 	if poll_timer <= 0.0:
 		poll_timer = POLL_SECONDS
@@ -78,13 +86,24 @@ func poll() -> void:
 
 
 func show_reading(reading: Dictionary) -> void:
-	var grid := split_mgrs(str(reading.get("mgrs", "")))
-	if grid.is_empty():
-		mgrs_label.text = "-- -- ----- e \n----- n "
-	else:
-		mgrs_label.text = "%s %s %s e \n%s n " % [grid[0], grid[1], grid[2], grid[3]]
+	var observer := str(reading.get("mgrs", ""))
+	follow_target(reading, observer)
 	time_label.text = str(reading.get("time", "--:--:--"))
-	elevation_label.text = "%d m" % roundi(float(reading.get("elevation", 0.0)))
+	if target.is_empty():
+		show_normal()
+		mgrs_label.text = grid_text(observer)
+		elevation_label.text = "%d m" % roundi(float(reading.get("elevation", 0.0)))
+	else:
+		# As JFSim's DAGR shows a lase: the target's grid, direction, distance and difference in altitude
+		header_label.text = " LRF TGT MODE - Target Grid:"
+		header_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		mgrs_label.text = grid_text(str(target.get("mgrs", "")))
+		elevation_caption.text = " Dn"
+		elevation_label.text = "%d mils" % int(target.get("dn_mils", 0))
+		date_caption.text = " Dist"
+		date_label.text = "%d m" % int(target.get("dist", 0))
+		accuracy_caption.text = " DifAlt"
+		accuracy_label.text = "%d m" % int(target.get("dif_alt", 0))
 	var batteries: Array = []
 	for b in reading.get("batteries", []):
 		var g := split_mgrs(str(b.get("mgrs", "")))
@@ -93,11 +112,39 @@ func show_reading(reading: Dictionary) -> void:
 	battery_label.text = battery_text(batteries, "%d" % int(reading.get("mv_mils", 0)))
 
 
+## A new lase starts target mode; the observer moving, or the lase going (mission ended), ends it
+func follow_target(reading: Dictionary, observer: String) -> void:
+	var t: Variant = reading.get("target")
+	var id := int(t.get("id", 0)) if t is Dictionary else 0
+	if last_target_id < 0:
+		last_target_id = id  # A lase from before the app started is not shown
+	elif id != last_target_id:
+		last_target_id = id
+		if id > 0:
+			target = t
+			target_observer = observer
+	if not target.is_empty() and (id == 0 or observer != target_observer):
+		target = {}
+
+
 func show_no_reading() -> void:
-	mgrs_label.text = "-- -- ----- e \n----- n "
+	target = {}
+	last_target_id = -1
+	show_normal()
+	mgrs_label.text = grid_text("")
 	time_label.text = "--:--:--"
 	elevation_label.text = "--- m"
 	battery_label.text = battery_text([], "---")
+
+
+## The normal captions, and the fixed accuracy
+func show_normal() -> void:
+	header_label.text = " MGRS-New\tWGD"
+	header_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_FILL  # Spreads MGRS-New and WGD to the edges
+	date_caption.text = " Date"
+	elevation_caption.text = " Elevation"
+	accuracy_caption.text = " Accuracy"
+	accuracy_label.text = "+/- 7m"
 
 
 ## The draft's layout: heading, then up to 5 batteries a line apart, Compass MV always on the same line.
@@ -112,6 +159,14 @@ func battery_text(batteries: Array, mv: String) -> String:
 			lines[2 + i * 2] = batteries[i]
 	lines[13] = "Compass MV: %s mils " % mv
 	return "\n".join(lines)
+
+
+## "60HUB9461034250" -> the draft's two lines, "60H UB 94610 e" over "34250 n"; dashes if it is not MGRS
+func grid_text(mgrs: String) -> String:
+	var grid := split_mgrs(mgrs)
+	if grid.is_empty():
+		return "-- -- ----- e \n----- n "
+	return "%s %s %s e \n%s n " % [grid[0], grid[1], grid[2], grid[3]]
 
 
 ## "60HUB9461034250" -> ["60H", "UB", "94610", "34250"]; [] if it is not MGRS

@@ -26,6 +26,8 @@ std::string state_json = "{\"ok\":false}"; // Guarded by state_mutex
 std::string last_raw;                      // Guarded by state_mutex: the SQF's last result, for "status"
 std::atomic<unsigned> requests{ 0 };
 std::string launch_status = "not yet";     // VBS thread only
+std::string target_json;                   // VBS thread only: the last lase with both buttons ("" = none)
+unsigned target_id = 0;
 
 const char* APP_EXE = "dagr.exe";
 
@@ -190,6 +192,8 @@ void dagr_update(void* execute_command, bool phone_connected)
         ((ExecuteCommandType)execute_command)(READ_SQF.c_str(), result, sizeof(result));
         std::string json = to_json(result);
         mission = json != "{\"ok\":false}";
+        if (!mission) target_json.clear(); // a lase belongs to its mission
+        if (!target_json.empty()) json.insert(json.size() - 1, ",\"target\":" + target_json);
         std::lock_guard<std::mutex> lock(state_mutex);
         state_json = json;
         last_raw = result;
@@ -202,6 +206,14 @@ void dagr_update(void* execute_command, bool phone_connected)
         launched = true;
         launch_app();
     }
+}
+
+void dagr_set_target(const std::string& mgrs, long dn_mils, long dist_m, long dif_alt_m)
+{
+    char buf[256];
+    sprintf_s(buf, "{\"id\":%u,\"mgrs\":\"%s\",\"dn_mils\":%ld,\"dist\":%ld,\"dif_alt\":%ld}",
+        ++target_id, mgrs.c_str(), dn_mils, dist_m, dif_alt_m);
+    target_json = buf;
 }
 
 void dagr_stop()

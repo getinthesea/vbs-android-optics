@@ -10,4 +10,7 @@ void dagr_start();                       // safe to call every step; starts the 
 // and starts the app if it is time to
 void dagr_update(void* execute_command, bool phone_connected);
 void dagr_stop();
+// A lase with both rangefinder buttons (lrf.cpp): the app shows it in JFSim's DAGR target mode. dn in mils,
+// dif_alt_m observer - target, as JFSim's DAGR shows them
+void dagr_set_target(const std::string& mgrs, long dn_mils, long dist_m, long dif_alt_m);
 std::string dagr_status();

@@ -7,7 +7,8 @@
 //     projector, else the player (anchor.h),
 //   - hides VBS's HUD (weapon status, crosshair, action menu) and restores it afterwards,
 //   - sets the field of view the phone asks for (its zoom presets),
-//   - streams the VBS window to the phone.
+//   - streams the VBS window to the phone,
+//   - works the phone's Bearing and Range buttons like the Vector's laser rangefinder (lrf.cpp).
 // When the phone stops sending for a few seconds, the normal view is handed back. No SQF or .pbo is needed.
 // It also feeds the DAGR app (dagr/, installed in plugins64\vbs-android-optics) whether or not a phone is connected,
 // and starts it once per mission on the PC the phone is connected to.
@@ -22,6 +23,7 @@
 #include "vbs_plugin.h"
 #include "anchor.h"
 #include "dagr.h"
+#include "lrf.h"
 #include "phone_link.h"
 #include "streamer.h"
 
@@ -89,6 +91,7 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
             active = false;
         }
         streamer_update(0);
+        lrf_step(ExecuteCommand, false, 0, 0, 0);
         return;
     }
 
@@ -136,6 +139,7 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         ANCHOR_SQF, ENSURE_CAMERA_SQF, realign,
         tan_half_h, tan_half_v, phone.heading - heading_zero, phone.pitch, phone.roll);
     run(cmd);
+    lrf_step(ExecuteCommand, true, phone.buttons, phone.heading - heading_zero, phone.pitch);
 
     streamer_update(phone.ip);
 }

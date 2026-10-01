@@ -13,12 +13,15 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.google.ar.core.ArCoreApk
@@ -41,6 +44,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
 
     companion object {
         const val AUTO = "auto" // Address that finds the VBS PC by itself
+        private const val MIN_HOLD_MS = 150L
     }
 
     private lateinit var glView: GLSurfaceView
@@ -80,6 +84,8 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     @Volatile private var seq = 0
 
     @Volatile private var calibrate = 0
+    @Volatile private var lrfButtons = 0    // Held now: bit 0 Bearing, bit 1 Range (sent with every pose)
+    private lateinit var lrfView: LrfView
     @Volatile private var trackingText = "starting"
     @Volatile private var cameraFps = 30
     @Volatile private var frames = 0
@@ -124,8 +130,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             text = "Go"
             setOnClickListener { applyHost() }
         }
-        val calibrateButton = Button(this).apply {
-            text = "Calibrate"
+        val calibrateButton = iconButton(R.drawable.ic_calibrate, "Calibrate").apply {
             setOnClickListener { calibrate = (calibrate + 1) and 0xFF }
         }
         val zoomButton = Button(this).apply {
@@ -178,8 +183,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(statusText)
             addView(controls)
         }
-        val statsButton = Button(this).apply {
-            text = "Settings"
+        val statsButton = iconButton(R.drawable.ic_settings, "Settings").apply {
             setOnClickListener {
                 panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                 hideSystemUi()
@@ -196,23 +200,23 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(statsButton, LinearLayout.LayoutParams(cornerW, cornerH))
             addView(panel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
-        for (b in listOf(statsButton, calibrateButton, connectButton, trackButton, zoomButton, videoButton, cardboardButton)) styleButton(b)
-        for (b in listOf(statsButton, calibrateButton)) {
-            b.textSize = 10f
-            b.setPadding(0, 0, 0, 0)
-            b.minWidth = 0
-            b.minHeight = 0
-            b.minimumWidth = 0
-            b.minimumHeight = 0
-        }
-        statsButton.layoutParams = LinearLayout.LayoutParams(cornerW, cornerH) // styleButton reset it
+        for (b in listOf(connectButton, trackButton, zoomButton, videoButton, cardboardButton)) styleButton(b)
         crosshair = CrosshairView(this).apply { visibility = View.GONE }
         cornerMask = CornerMaskView(this)
+        lrfView = LrfView(this)
+        // The Vector's two buttons, in the bottom corners: Bearing on the left, Range on the right, both together to lase
+        val bearingButton = lrfButton(R.drawable.ic_bearing, "Bearing", 1)
+        val rangeButton = lrfButton(R.drawable.ic_range, "Range", 2)
+        val lrfW = (64 * density).toInt()
+        val lrfH = (40 * density).toInt()
         applyEyes()
         setContentView(FrameLayout(this).apply {
             addView(glView)
             addView(cornerMask)
             addView(crosshair)
+            addView(lrfView)
+            addView(bearingButton, FrameLayout.LayoutParams(lrfW, lrfH, Gravity.BOTTOM or Gravity.START).apply { setMargins(cornerGap, cornerGap, cornerGap, cornerGap) })
+            addView(rangeButton, FrameLayout.LayoutParams(lrfW, lrfH, Gravity.BOTTOM or Gravity.END).apply { setMargins(cornerGap, cornerGap, cornerGap, cornerGap) })
             addView(topLeft, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
             addView(calibrateButton, FrameLayout.LayoutParams(cornerW, cornerH, Gravity.TOP or Gravity.END).apply { setMargins(cornerGap, cornerGap, cornerGap, cornerGap) })
         })
@@ -222,6 +226,42 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
                 ui.postDelayed(this, 250)
             }
         })
+        // The rangefinder display follows the PC's acks closely
+        ui.post(object : Runnable {
+            override fun run() {
+                val l = link
+                if (l == null) lrfView.show("", "", false) else lrfView.show(l.lrfLeft, l.lrfRight, l.lrfMark)
+                ui.postDelayed(this, 30)
+            }
+        })
+    }
+
+    /**
+     * A rangefinder button: held while touched (both can be held at once). A quick tap is held for at least
+     * MIN_HOLD_MS so the PC, which samples it with each pose, cannot miss it.
+     */
+    private fun lrfButton(icon: Int, label: String, bit: Int): ImageButton {
+        var downAt = 0L
+        var presses = 0
+        return iconButton(icon, label).apply {
+            setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        presses++
+                        downAt = System.currentTimeMillis()
+                        lrfButtons = lrfButtons or bit
+                        v.isPressed = true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        val press = presses
+                        val wait = (MIN_HOLD_MS - (System.currentTimeMillis() - downAt)).coerceAtLeast(0)
+                        ui.postDelayed({ if (presses == press) lrfButtons = lrfButtons and bit.inv() }, wait)
+                        v.isPressed = false
+                    }
+                }
+                true
+            }
+        }
     }
 
     override fun onResume() {
@@ -308,7 +348,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     private fun sendGyroPose(timestampNs: Long, deviceToWorld: FloatArray) {
         val a = Rot.quarterTurnsZ(displayTurns)                           // device axes -> display axes
         val displayToWorld = Rot.mul(Rot.mul(Rot.ANDROID_TO_Y_UP, deviceToWorld), Rot.transpose(a))
-        link?.send(seq++, timestampNs, Rot.toQuat(displayToWorld), true, calibrate, ZOOMS[zoom].second)
+        link?.send(seq++, timestampNs, Rot.toQuat(displayToWorld), true, calibrate, ZOOMS[zoom].second, lrfButtons)
         frames++
     }
 
@@ -317,6 +357,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         val eyes = if (cardboard) 2 else 1
         crosshair.eyes = eyes
         cornerMask.eyes = eyes
+        lrfView.eyes = eyes
     }
 
     private fun applyHost() {
@@ -424,6 +465,16 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         statusText.text = "$source\n$linkText\n$videoText"
     }
 
+    /** The corner buttons: just the icon, no background, scaled to fit with a little margin */
+    private fun iconButton(icon: Int, label: String): ImageButton = ImageButton(this).apply {
+        background = null
+        setImageResource(icon)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        val pad = (3 * resources.displayMetrics.density).toInt()
+        setPadding(pad, pad, pad, pad)
+        contentDescription = label
+    }
+
     /** #444444 buttons with black text */
     private fun styleButton(b: Button) {
         b.background = android.graphics.drawable.GradientDrawable().apply {
@@ -501,7 +552,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         trackingText = if (tracking) "tracking"
             else "not tracking (${camera.trackingFailureReason}) - move the phone side to side to start"
         // Display-oriented: X right, Y up, looking along -Z; world Y up with gravity
-        link?.send(seq++, frame.timestamp, camera.displayOrientedPose.rotationQuaternion, tracking, calibrate, ZOOMS[zoom].second)
+        link?.send(seq++, frame.timestamp, camera.displayOrientedPose.rotationQuaternion, tracking, calibrate, ZOOMS[zoom].second, lrfButtons)
         frames++
     }
 }
