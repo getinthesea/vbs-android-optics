@@ -4,7 +4,8 @@
 //   Bearing twice  within 3 s: bearing, and the vertical angle (mils) on the right; then locked until it clears
 //   Range          range (m) on the right. After Bearing, Range is ignored until the display clears
 //   Range twice    within 3 s: range on the left, difference in altitude (target - observer, m) on the right
-//   Both           bearing and range, and the lase goes to JFSim's DAGR (and to ours)
+//   Both           bearing and range, and the lase goes to JFSim's DAGR (and to ours, which shows it until
+//                  Bearing or Range is used on its own)
 // The display clears 4 s after the last press. Ranges beyond 8000 m or under 5 m read "- - - -". Each lase is
 // published as vector_aim_point, which JFSim's instructor app picks up; JFSim's LRF-disable switch
 // (global_vector_lrf_disable) is honoured.
@@ -220,6 +221,7 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
         double_left = now;
         timeout = now;
         publish(execute, lase(execute, heading_delta, pitch), false, pitch);
+        dagr_clear_target(); // On release, not press: a lase with both often starts with one button a moment early
     }
     if (right && !disable_input && !disable_right) { // RIGHT PRESS
         right_down = true;
@@ -240,6 +242,7 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
         }
         double_right = now;
         publish(execute, l, false, pitch);
+        dagr_clear_target();
     }
     if (timeout >= 0 && now - timeout >= CLEAR_AFTER_S) { // CLEAR DISPLAY
         left_text.clear();

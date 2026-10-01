@@ -216,6 +216,11 @@ void dagr_set_target(const std::string& mgrs, long dn_mils, long dist_m, long di
     target_json = buf;
 }
 
+void dagr_clear_target()
+{
+    target_json.clear();
+}
+
 void dagr_stop()
 {
     // Called from DllMain: joining threads there can deadlock, so just ask the server to finish (it times out in 250 ms)

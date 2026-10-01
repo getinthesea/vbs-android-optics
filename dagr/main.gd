@@ -70,6 +70,16 @@ func _process(delta: float) -> void:
 		show_no_reading()
 
 
+## Escape switches between fullscreen and a window
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		var window := get_window()
+		if window.mode == Window.MODE_FULLSCREEN or window.mode == Window.MODE_EXCLUSIVE_FULLSCREEN:
+			window.mode = Window.MODE_WINDOWED
+		else:
+			window.mode = Window.MODE_FULLSCREEN
+
+
 func connected() -> bool:
 	return Time.get_ticks_msec() - last_reply_ms < LOST_AFTER_MS
 

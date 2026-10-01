@@ -13,4 +13,6 @@ void dagr_stop();
 // A lase with both rangefinder buttons (lrf.cpp): the app shows it in JFSim's DAGR target mode. dn in mils,
 // dif_alt_m observer - target, as JFSim's DAGR shows them
 void dagr_set_target(const std::string& mgrs, long dn_mils, long dist_m, long dif_alt_m);
+// A Bearing or Range press on its own: the app leaves target mode and shows the observer's grid again
+void dagr_clear_target();
 std::string dagr_status();
