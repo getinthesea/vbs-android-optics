@@ -73,13 +73,13 @@
      style="fill:#ffffff;stroke:#000000;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round"
      d="M 11.900391 1.5859375 C 11.376298 1.5859375 10.955078 2.0071575 10.955078 2.53125 L 10.955078 10.955078 L 2.53125 10.955078 C 2.0071575 10.955078 1.5859375 11.376298 1.5859375 11.900391 L 1.5859375 12.099609 C 1.5859375 12.623702 2.0071575 13.044922 2.53125 13.044922 L 10.955078 13.044922 L 10.955078 21.46875 C 10.955078 21.992843 11.376298 22.414062 11.900391 22.414062 L 12.099609 22.414062 C 12.623702 22.414062 13.044922 21.992843 13.044922 21.46875 L 13.044922 13.044922 L 21.46875 13.044922 C 21.992843 13.044922 22.414062 12.623702 22.414062 12.099609 L 22.414062 11.900391 C 22.414062 11.376298 21.992843 10.955078 21.46875 10.955078 L 13.044922 10.955078 L 13.044922 2.53125 C 13.044922 2.0071575 12.623702 1.5859375 12.099609 1.5859375 L 11.900391 1.5859375 z " />
   <rect
-     style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none"
+     style="fill:#000000;fill-opacity:1;stroke:#444444;stroke-opacity:1;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none"
      id="rect1-2"
-     width="24"
-     height="24"
-     x="0"
-     y="0"
-     ry="6.7712083" />
+     width="23"
+     height="23"
+     x="0.5"
+     y="0.5"
+     ry="6.2712083" />
   <circle
      style="display:none;fill:#ffffff;fill-opacity:1;stroke:#ffffff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
      id="path1"
