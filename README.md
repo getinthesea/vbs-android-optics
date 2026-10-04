@@ -15,7 +15,7 @@ While the app is connected, the plugin does the following:
 - **Camera:** looks through its own camera at the player's eye, aimed by the phone.
   - **Heading** is relative to where the player faced when the phone connected. **Calibrate** re-aligns it to wherever the phone points.
   - **Pitch and roll** come from gravity.
-- **Zoom:** sets the field of view picked on the phone (1×, NVG, 4×, 7× binos, 10×, 15×).
+- **Zoom:** sets the field of view picked on the phone (1× to 5× in steps of 0.5×; 1× is 60° across).
 - **Video:** streams the VBS window to the phone from a background thread, using hardware H.264 on the GPU that shows VBS. The phone decodes it in low-latency mode.
 - **Hand-back:** when the phone stops sending for 3 s, the normal VBS view comes back.
 

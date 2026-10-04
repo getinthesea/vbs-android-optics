@@ -29,6 +29,12 @@ class LrfView(context: Context) : View(context) {
             if (field != value) { field = value; invalidate() }
         }
 
+    /** Pixels each eye's picture moves outward, negative inward (see Eyes) */
+    var eyeShift = 0f
+        set(value) {
+            if (field != value) { field = value; invalidate() }
+        }
+
     fun show(left: String, right: String, mark: Boolean) {
         if (left == this.left && right == this.right && mark == this.mark) return
         this.left = left
@@ -43,7 +49,7 @@ class LrfView(context: Context) : View(context) {
         for (eye in 0 until eyes) {
             canvas.save()
             canvas.clipRect(eye * eyeWidth, 0, (eye + 1) * eyeWidth, height)
-            canvas.translate((eye * eyeWidth).toFloat(), 0f)
+            canvas.translate(eye * eyeWidth + Eyes.offset(eye, eyes, eyeShift), 0f)
             drawDisplay(canvas, eyeWidth.toFloat(), height.toFloat())
             canvas.restore()
         }

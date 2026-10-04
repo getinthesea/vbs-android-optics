@@ -70,9 +70,16 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     @Volatile private var displayTurns = 1  // Screen rotation in quarter turns (device axes -> display axes)
     @Volatile private var videoOn = true // Off: stop receiving/decoding and show the camera (what ARCore sees)
     @Volatile private var cardboard = false // Google Cardboard: the video side by side, once per eye
+    @Volatile private var eyeShift = 0f     // Cardboard: pixels each eye's picture moves outward (Eyes)
+    private var lensMm = Eyes.DEFAULT_MM    // Cardboard: the viewer's lens spacing
 
     // Zoom presets: name and horizontal field of view in degrees. The plugin sets VBS's view to match.
-    private val ZOOMS = listOf("1x" to 60f, "NVG" to 40f, "4x" to 15f, "7x binos" to 7.6f, "10x" to 5.5f, "15x" to 3.7f)
+    // 1x to 5x in steps of 0.5x. Magnification divides the tangent of the half-angle: 1x is 60 degrees, 2x 32.2,
+    // 3x 21.8, 4x 16.4, 5x 13.2.
+    private val ZOOMS = (2..10).map { it / 2.0 }.map { m ->
+        val name = if (m % 1.0 == 0.0) "${m.toInt()}x" else "${m}x"
+        name to Math.toDegrees(2 * kotlin.math.atan(kotlin.math.tan(Math.toRadians(30.0)) / m)).toFloat()
+    }
     @Volatile private var zoom = 3
     private lateinit var crosshair: CrosshairView
     private lateinit var cornerMask: CornerMaskView
@@ -99,6 +106,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         if (intent.getBooleanExtra("novideo", false)) videoOn = false // --ez novideo true: diagnostics
         gyroMode = prefs.getBoolean("gyroMode", true)
         cardboard = prefs.getBoolean("cardboard", false)
+        lensMm = prefs.getFloat("lensMm", Eyes.DEFAULT_MM).let { if (it > 0) it else Eyes.DEFAULT_MM }
 
         glView = GLSurfaceView(this).apply {
             preserveEGLContextOnPause = true
@@ -174,6 +182,36 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(videoButton)
             addView(cardboardButton)
         }
+        // Cardboard lens spacing: moves the two pictures so their centres sit behind the viewer's lenses.
+        // Tapping the value goes back to the default.
+        val lensButton = Button(this)
+        fun showLens() {
+            lensButton.text = "Lenses: %.1f mm".format(lensMm)
+        }
+        fun setLens(mm: Float) {
+            lensMm = mm.coerceIn(Eyes.MIN_MM, Eyes.MAX_MM)
+            prefs.edit().putFloat("lensMm", lensMm).apply()
+            showLens()
+            applyEyes()
+        }
+        fun stepLens(by: Float) = setLens(lensMm + by)
+        lensButton.setOnClickListener { setLens(Eyes.DEFAULT_MM) }
+        val lensCloser = Button(this).apply { text = "Closer"; setOnClickListener { stepLens(-1f) } }
+        val lensWider = Button(this).apply { text = "Wider"; setOnClickListener { stepLens(1f) } }
+        showLens()
+        val lensRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = "Cardboard lens spacing:"
+                setTextColor(Color.WHITE)
+                textSize = 16f
+                setPadding(6, 0, 12, 0)
+            })
+            addView(lensCloser)
+            addView(lensButton)
+            addView(lensWider)
+        }
         // Everything but Calibrate lives in a panel behind the Stats button (top left), so the view stays clear
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -182,6 +220,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             visibility = View.GONE
             addView(statusText)
             addView(controls)
+            addView(lensRow)
         }
         val statsButton = iconButton(R.drawable.ic_settings, "Settings").apply {
             setOnClickListener {
@@ -200,7 +239,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             addView(statsButton, LinearLayout.LayoutParams(cornerW, cornerH))
             addView(panel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
-        for (b in listOf(connectButton, trackButton, zoomButton, videoButton, cardboardButton)) styleButton(b)
+        for (b in listOf(connectButton, trackButton, zoomButton, videoButton, cardboardButton, lensCloser, lensButton, lensWider)) styleButton(b)
         crosshair = CrosshairView(this).apply { visibility = View.GONE }
         cornerMask = CornerMaskView(this)
         lrfView = LrfView(this)
@@ -352,12 +391,25 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         frames++
     }
 
-    /** Overlays follow the video: one picture, or one per eye for Cardboard */
+    /** Overlays follow the video: one picture, or one per eye for Cardboard, moved to the lens spacing */
     private fun applyEyes() {
         val eyes = if (cardboard) 2 else 1
+        val (width, pxPerMm) = screenSize()
+        eyeShift = if (cardboard) Eyes.shift(width, pxPerMm, lensMm) else 0f
         crosshair.eyes = eyes
         cornerMask.eyes = eyes
         lrfView.eyes = eyes
+        crosshair.eyeShift = eyeShift
+        cornerMask.eyeShift = eyeShift
+        lrfView.eyeShift = eyeShift
+    }
+
+    /** The whole screen's width in landscape (the app draws edge to edge), and its pixels per millimetre */
+    @Suppress("DEPRECATION")
+    private fun screenSize(): Pair<Int, Float> {
+        val m = android.util.DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(m)
+        return Pair(maxOf(m.widthPixels, m.heightPixels), (m.xdpi + m.ydpi) / 2 / 25.4f)
     }
 
     private fun applyHost() {
@@ -540,7 +592,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         val stream = videoStream
         v?.update()
         if (v != null && stream != null && System.nanoTime() - stream.lastFrameNs < 1_000_000_000L) {
-            v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, if (cardboard) 2 else 1)
+            v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, if (cardboard) 2 else 1, eyeShift)
         } else if (frame != null) {
             background.draw(frame)
         }

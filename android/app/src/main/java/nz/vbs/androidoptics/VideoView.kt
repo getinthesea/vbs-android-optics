@@ -58,16 +58,16 @@ class VideoView {
 
     /**
      * Draws the frame side by side [eyes] times (1, or 2 for Cardboard), each filling its share of the view
-     * and keeping its shape (the overflow is cropped, centred)
+     * and keeping its shape (the overflow is cropped, centred), moved sideways by [eyeShift] (see Eyes)
      */
-    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int, eyes: Int = 1) {
+    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int, eyes: Int = 1, eyeShift: Float = 0f) {
         if (!hasFrame || videoWidth == 0 || videoHeight == 0) return
         val eyeWidth = viewWidth / eyes
         GLES20.glEnable(GLES20.GL_SCISSOR_TEST) // Keeps each eye's cropped overflow out of the other
         for (eye in 0 until eyes) {
             val left = eye * eyeWidth
             GLES20.glScissor(left, 0, eyeWidth, viewHeight)
-            drawIn(left, eyeWidth, viewHeight, videoWidth, videoHeight)
+            drawIn(left + Eyes.offset(eye, eyes, eyeShift).toInt(), eyeWidth, viewHeight, videoWidth, videoHeight)
         }
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         GLES20.glViewport(0, 0, viewWidth, viewHeight)

@@ -25,16 +25,28 @@ class CornerMaskView(context: Context) : View(context) {
             if (field != value) { field = value; invalidate() }
         }
 
+    /** Pixels each eye's picture moves outward, negative inward (see Eyes) */
+    var eyeShift = 0f
+        set(value) {
+            if (field != value) { field = value; invalidate() }
+        }
+
     override fun onDraw(canvas: Canvas) {
         val eyeW = width.toFloat() / eyes
         val h = height.toFloat()
         val radius = h / 3f
-        path.reset()
-        path.fillType = Path.FillType.EVEN_ODD // The screen minus the rounded pictures
-        path.addRect(0f, 0f, width.toFloat(), h, Path.Direction.CW)
         for (eye in 0 until eyes) {
-            path.addRoundRect(RectF(eye * eyeW, 0f, (eye + 1) * eyeW, h), radius, radius, Path.Direction.CW)
+            // This eye's share of the screen minus its rounded picture, which moves with the picture
+            val left = eye * eyeW
+            val dx = Eyes.offset(eye, eyes, eyeShift)
+            canvas.save()
+            canvas.clipRect(left, 0f, left + eyeW, h)
+            path.reset()
+            path.fillType = Path.FillType.EVEN_ODD
+            path.addRect(left, 0f, left + eyeW, h, Path.Direction.CW)
+            path.addRoundRect(RectF(left + dx, 0f, left + eyeW + dx, h), radius, radius, Path.Direction.CW)
+            canvas.drawPath(path, black)
+            canvas.restore()
         }
-        canvas.drawPath(path, black)
     }
 }
