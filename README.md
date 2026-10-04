@@ -41,6 +41,20 @@ The display clears 4 s after the last press. Ranges beyond 8000 m or under 5 m r
 the ground at the centre of the view; buildings and trees are not seen, as with `vector.sqf`. Each lase is
 published as `vector_aim_point` for JFSim's instructor app, and JFSim's LRF-disable switch is honoured.
 
+### Physical buttons
+
+Any USB or Bluetooth keyboard works the rangefinder: **F9** is Bearing and **F10** is Range, held while the key
+is down. `pico/` turns a Raspberry Pi Pico (or Pico W) into one, for a mount with real buttons:
+
+1. Install CircuitPython for the Pico W (hold BOOTSEL, plug into the PC, copy the `.uf2` onto `RPI-RP2`).
+2. Copy `adafruit_hid` from the CircuitPython library bundle into `CIRCUITPY\lib`, then `pico\code.py` and
+   `pico\boot.py` onto `CIRCUITPY`.
+3. Wire Bearing between GP3 (pin 5) and GND (pin 3), Range between GP5 (pin 7) and GND (pin 8).
+4. Plug it into the phone with a USB-C to micro-USB OTG cable; the phone powers it.
+
+`boot.py` hides the Pico's drive so the phone only sees a keyboard. Hold Range while plugging it into the PC to
+get the drive back.
+
 ## DAGR
 
 `dagr.exe` shows a DAGR for the same observer, whether or not a phone is connected. The plugin reads VBS four

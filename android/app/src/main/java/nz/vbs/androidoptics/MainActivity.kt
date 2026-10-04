@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -279,28 +280,50 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
      * A rangefinder button: held while touched (both can be held at once). A quick tap is held for at least
      * MIN_HOLD_MS so the PC, which samples it with each pose, cannot miss it.
      */
-    private fun lrfButton(icon: Int, label: String, bit: Int): ImageButton {
-        var downAt = 0L
-        var presses = 0
-        return iconButton(icon, label).apply {
+    private fun lrfButton(icon: Int, label: String, bit: Int): ImageButton =
+        iconButton(icon, label).apply {
             setOnTouchListener { v, e ->
                 when (e.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        presses++
-                        downAt = System.currentTimeMillis()
-                        lrfButtons = lrfButtons or bit
-                        v.isPressed = true
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        val press = presses
-                        val wait = (MIN_HOLD_MS - (System.currentTimeMillis() - downAt)).coerceAtLeast(0)
-                        ui.postDelayed({ if (presses == press) lrfButtons = lrfButtons and bit.inv() }, wait)
-                        v.isPressed = false
-                    }
+                    MotionEvent.ACTION_DOWN -> { lrfPress(bit); v.isPressed = true }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { lrfRelease(bit); v.isPressed = false }
                 }
                 true
             }
         }
+
+    // A rangefinder button going down and up, from the screen or from physical buttons (keys, below)
+    private val lrfDownAt = LongArray(2)
+    private val lrfPresses = IntArray(2)
+
+    private fun lrfPress(bit: Int) {
+        val i = bit - 1 // bit 1 Bearing, 2 Range
+        lrfPresses[i]++
+        lrfDownAt[i] = System.currentTimeMillis()
+        lrfButtons = lrfButtons or bit
+    }
+
+    private fun lrfRelease(bit: Int) {
+        val i = bit - 1
+        val press = lrfPresses[i]
+        val wait = (MIN_HOLD_MS - (System.currentTimeMillis() - lrfDownAt[i])).coerceAtLeast(0)
+        ui.postDelayed({ if (lrfPresses[i] == press) lrfButtons = lrfButtons and bit.inv() }, wait)
+    }
+
+    /**
+     * Physical buttons: anything that types F9 (Bearing) or F10 (Range), such as the Pico in pico/ on USB, works
+     * like the on-screen buttons, held while the key is down. Caught before the views see them.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val bit = when (event.keyCode) {
+            KeyEvent.KEYCODE_F9 -> 1
+            KeyEvent.KEYCODE_F10 -> 2
+            else -> return super.dispatchKeyEvent(event)
+        }
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) lrfPress(bit)
+            KeyEvent.ACTION_UP -> lrfRelease(bit)
+        }
+        return true
     }
 
     override fun onResume() {
