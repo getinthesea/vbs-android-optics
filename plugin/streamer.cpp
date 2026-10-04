@@ -116,6 +116,11 @@ static RECT client_rect_on_screen(HWND hwnd)
     return RECT{ tl.x, tl.y, br.x, br.y };
 }
 
+HWND vbs_window()
+{
+    return find_vbs_window();
+}
+
 double vbs_window_aspect()
 {
     HWND vbs = find_vbs_window();

@@ -21,7 +21,7 @@ import kotlin.math.tan
 class CrosshairView(context: Context) : View(context) {
     private val line = Paint().apply {
         color = Color.BLACK
-        strokeWidth = 3f
+        strokeWidth = 1.5f
         isAntiAlias = true
     }
     private val label = Paint().apply {
@@ -49,13 +49,19 @@ class CrosshairView(context: Context) : View(context) {
             if (field != value) { field = value; invalidate() }
         }
 
+    /** Pixels each eye's picture moves outward, negative inward (see Eyes) */
+    var eyeShift = 0f
+        set(value) {
+            if (field != value) { field = value; invalidate() }
+        }
+
     override fun onDraw(canvas: Canvas) {
         if (fovDeg <= 0f || videoWidth == 0 || videoHeight == 0) return
         val eyeWidth = width / eyes
         for (eye in 0 until eyes) {
             canvas.save()
             canvas.clipRect(eye * eyeWidth, 0, (eye + 1) * eyeWidth, height)
-            canvas.translate((eye * eyeWidth).toFloat(), 0f)
+            canvas.translate(eye * eyeWidth + Eyes.offset(eye, eyes, eyeShift), 0f)
             drawGraticule(canvas, eyeWidth, height)
             canvas.restore()
         }
