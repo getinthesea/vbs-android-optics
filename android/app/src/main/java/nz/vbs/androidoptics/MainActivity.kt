@@ -67,7 +67,9 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     private var video: VideoView? = null
     @Volatile private var videoStream: VideoStream? = null
     private val gyro by lazy { GyroTracker(this) }
-    @Volatile private var gyroMode = true   // Tracking source: gyro, or ARCore when false
+    @Volatile private var fusion = ArGyroFusion() // ARCore mode: gyro poses held true by ARCore's
+    @Volatile private var gyroFill = false         // ARCore mode, filled in with the gyro (if the phone has one)
+    @Volatile private var gyroMode = false  // Tracking source: ARCore (default), or gyro when true
     @Volatile private var displayTurns = 1  // Screen rotation in quarter turns (device axes -> display axes)
     @Volatile private var videoOn = true // Off: stop receiving/decoding and show the camera (what ARCore sees)
     @Volatile private var cardboard = false // Google Cardboard: the video side by side, once per eye
@@ -105,7 +107,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         intent.getStringExtra("host")?.let { prefs.edit().putString("host", it).apply() }
         zoom = prefs.getInt("zoom", 3).coerceIn(0, ZOOMS.size - 1)
         if (intent.getBooleanExtra("novideo", false)) videoOn = false // --ez novideo true: diagnostics
-        gyroMode = prefs.getBoolean("gyroMode", true)
+        gyroMode = prefs.getBoolean("gyroMode", false)
         cardboard = prefs.getBoolean("cardboard", false)
         lensMm = prefs.getFloat("lensMm", Eyes.DEFAULT_MM).let { if (it > 0) it else Eyes.DEFAULT_MM }
 
@@ -367,6 +369,13 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             session = null
             return
         }
+        // Every pose comes from the gyro (~100 a second), held true by ARCore's 30 a second (ArGyroFusion)
+        fusion = ArGyroFusion()
+        gyroFill = gyro.available
+        if (gyroFill) {
+            gyro.onOrientation = { t, r -> sendFusedPose(t, r) }
+            gyro.start()
+        }
         glView.onResume()
         startLink()
     }
@@ -412,10 +421,21 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
 
     /** Gyro tracking: send the phone's orientation as the display-oriented pose ARCore would give */
     private fun sendGyroPose(timestampNs: Long, deviceToWorld: FloatArray) {
-        val a = Rot.quarterTurnsZ(displayTurns)                           // device axes -> display axes
-        val displayToWorld = Rot.mul(Rot.mul(Rot.ANDROID_TO_Y_UP, deviceToWorld), Rot.transpose(a))
-        link?.send(seq++, timestampNs, Rot.toQuat(displayToWorld), true, calibrate, ZOOMS[zoom].second, lrfButtons)
+        link?.send(seq++, timestampNs, displayToWorld(deviceToWorld), true, calibrate, ZOOMS[zoom].second, lrfButtons)
         frames++
+    }
+
+    /** ARCore mode: send the gyro's orientation, corrected towards ARCore's */
+    private fun sendFusedPose(timestampNs: Long, deviceToWorld: FloatArray) {
+        val q = fusion.gyro(timestampNs, displayToWorld(deviceToWorld))
+        link?.send(seq++, timestampNs, q, true, calibrate, ZOOMS[zoom].second, lrfButtons)
+        frames++
+    }
+
+    /** The gyro's device -> world rotation as a display -> world quaternion, Y up (ARCore's displayOrientedPose) */
+    private fun displayToWorld(deviceToWorld: FloatArray): FloatArray {
+        val a = Rot.quarterTurnsZ(displayTurns)                           // device axes -> display axes
+        return Rot.toQuat(Rot.mul(Rot.mul(Rot.ANDROID_TO_Y_UP, deviceToWorld), Rot.transpose(a)))
     }
 
     /** Overlays follow the video: one picture, or one per eye for Cardboard, moved to the lens spacing */
@@ -634,7 +654,12 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         trackingText = if (tracking) "tracking"
             else "not tracking (${camera.trackingFailureReason}) - move the phone side to side to start"
         // Display-oriented: X right, Y up, looking along -Z; world Y up with gravity
-        link?.send(seq++, frame.timestamp, camera.displayOrientedPose.rotationQuaternion, tracking, calibrate, ZOOMS[zoom].second, lrfButtons)
-        frames++
+        val q = camera.displayOrientedPose.rotationQuaternion
+        if (gyroFill) {
+            fusion.arcore(frame.timestamp, q, tracking) // the gyro sends; this holds it true
+        } else {
+            link?.send(seq++, frame.timestamp, q, tracking, calibrate, ZOOMS[zoom].second, lrfButtons)
+            frames++
+        }
     }
 }

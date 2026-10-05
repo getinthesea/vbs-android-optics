@@ -114,7 +114,7 @@ For Google Cardboard, set **View: Cardboard** in Settings (remembered). The vide
 
 The app has two tracking sources, switched with the **Gyro** / **ARCore** button (remembered):
 
-| | Gyro (default) | ARCore |
+| | Gyro | ARCore (default) |
 |---|---|---|
 | Uses | Android's game rotation vector (gyro + accelerometer) | The camera plus motion sensors |
 | Rate | ~100 poses/s | Camera rate (30/s on a Galaxy A54) |
