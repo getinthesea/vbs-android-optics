@@ -2,6 +2,8 @@
 #   .\build.ps1            build
 #   .\build.ps1 -Flash     build and flash: to a Pico in BOOTSEL mode (the RPI-RP2 drive), else to one already
 #                          running this firmware on USB (it is restarted into BOOTSEL by itself)
+# Flashing forgets the Pico's Bluetooth pairing (the keys live in the firmware image): unpair "VBS Buttons" on the
+# phone and pair it again afterwards.
 # Needs arduino-cli with Earle Philhower's core:
 #   arduino-cli config set board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
 #   arduino-cli core install rp2040:rp2040
@@ -17,11 +19,13 @@ $out = Join-Path $PSScriptRoot "build"
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 if (-not $Flash) { return }
 
+$repair = 'Bluetooth pairing is reset: on the phone, unpair "VBS Buttons" and pair it again.'
 $uf2 = Join-Path $out "vbs_buttons.ino.uf2"
 $boot = Get-Volume | Where-Object { $_.FileSystemLabel -eq "RPI-RP2" } | Select-Object -First 1
 if ($boot) {
     Copy-Item $uf2 "$($boot.DriveLetter):\"
     Write-Host "Flashed to the Pico on $($boot.DriveLetter): - it restarts by itself"
+    Write-Host $repair -ForegroundColor Yellow
     return
 }
 $port = Get-PnpDevice -PresentOnly -Class Ports | Where-Object { $_.InstanceId -match "VID_2E8A" } | Select-Object -First 1
@@ -29,3 +33,4 @@ if (-not $port) { throw "No Pico found: hold BOOTSEL while plugging it in, then 
 $com = $port.FriendlyName -replace ".*\((COM\d+)\).*", '$1'
 & $Cli upload --fqbn $fqbn -p $com --input-dir $out
 if ($LASTEXITCODE -ne 0) { throw "Flash failed: hold BOOTSEL while plugging it in, then run this again" }
+Write-Host $repair -ForegroundColor Yellow

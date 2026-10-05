@@ -58,7 +58,7 @@ forget paired phones, so another can pair.
 
 The firmware is an Arduino sketch (`pico\vbs_buttons`) for Earle Philhower's Pico core. `pico\build.ps1 -Flash`
 builds it with arduino-cli and flashes it: to a Pico held in BOOTSEL as it is plugged in, or to one already running
-it, on USB.
+it, on USB. Flashing resets its Bluetooth pairing, so unpair **VBS Buttons** on the phone and pair it again.
 
 ## DAGR
 
