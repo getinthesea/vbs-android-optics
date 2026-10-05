@@ -44,16 +44,21 @@ published as `vector_aim_point` for JFSim's instructor app, and JFSim's LRF-disa
 ### Physical buttons
 
 Any USB or Bluetooth keyboard works the rangefinder: **F9** is Bearing and **F10** is Range, held while the key
-is down. `pico/` turns a Raspberry Pi Pico (or Pico W) into one, for a mount with real buttons:
+is down. `pico/` turns a Raspberry Pi Pico W into one, for a mount with real buttons. It is a keyboard over USB
+and Bluetooth at once:
 
-1. Install CircuitPython for the Pico W (hold BOOTSEL, plug into the PC, copy the `.uf2` onto `RPI-RP2`).
-2. Copy `adafruit_hid` from the CircuitPython library bundle into `CIRCUITPY\lib`, then `pico\code.py` and
-   `pico\boot.py` onto `CIRCUITPY`.
-3. Wire Bearing between GP3 (pin 5) and GND (pin 3), Range between GP5 (pin 7) and GND (pin 8).
-4. Plug it into the phone with a USB-C to micro-USB OTG cable; the phone powers it.
+- **USB:** plug it into the phone with a USB-C to micro-USB OTG data cable; the phone powers it.
+- **Bluetooth:** power it from a battery (VSYS pin 39, GND pin 38, 1.8-5.5 V), and pair **VBS Buttons** once in
+  the phone's Bluetooth settings. It reconnects by itself after that.
 
-`boot.py` hides the Pico's drive so the phone only sees a keyboard. Hold Range while plugging it into the PC to
-get the drive back.
+Wire Bearing between GP3 (pin 5) and GND (pin 3), Range between GP5 (pin 7) and GND (pin 8), and Calibrate
+between GP7 (pin 10) and GND (pin 8 or 13). Calibrate types **F8**, which the app treats as its Calibrate button.
+The LED lights while a button is held, and blinks every 2 s while nothing is connected. Hold Bearing while powering it up to
+forget paired phones, so another can pair.
+
+The firmware is an Arduino sketch (`pico\vbs_buttons`) for Earle Philhower's Pico core. `pico\build.ps1 -Flash`
+builds it with arduino-cli and flashes it: to a Pico held in BOOTSEL as it is plugged in, or to one already running
+it, on USB.
 
 ## DAGR
 

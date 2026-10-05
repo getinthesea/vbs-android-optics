@@ -310,10 +310,14 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     }
 
     /**
-     * Physical buttons: anything that types F9 (Bearing) or F10 (Range), such as the Pico in pico/ on USB, works
-     * like the on-screen buttons, held while the key is down. Caught before the views see them.
+     * Physical buttons: anything that types F9 (Bearing) or F10 (Range), such as the Pico in pico/, works like the
+     * on-screen buttons, held while the key is down; F8 is Calibrate, once per press. Caught before the views.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_F8) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) calibrate = (calibrate + 1) and 0xFF
+            return true
+        }
         val bit = when (event.keyCode) {
             KeyEvent.KEYCODE_F9 -> 1
             KeyEvent.KEYCODE_F10 -> 2
