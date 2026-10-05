@@ -122,7 +122,11 @@ The app has two tracking sources, switched with the **Gyro** / **ARCore** button
 | Heading | Drifts slowly; re-zero with **Calibrate** | Holds once tracking |
 | Dark (dome) | Works | Needs light |
 
-Pitch and roll come from gravity in both. With ARCore, until it tracks the view holds level and ahead. ARCore would not hold tracking on the Galaxy A54 used for testing: its log showed motion-sensor data arriving late. That is why gyro is the default.
+Pitch and roll come from gravity in both. With ARCore, until it tracks the view holds level and ahead.
+
+ARCore reads the gyro and accelerometer at 200 Hz, which Android only allows apps that declare
+`HIGH_SAMPLING_RATE_SENSORS`. Without it, ARCore's sensor requests fail quietly, it gets about 6 samples a
+second, and it cannot track (its log fills with "IMU buffer is empty"). The app declares it.
 
 ## Tests
 
