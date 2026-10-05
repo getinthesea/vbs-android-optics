@@ -535,7 +535,10 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
                 "${v.keyRequests} key requests, receive-to-screen %.1f ms".format(v.decodeMsAvg)
         }
         crosshair.visibility = if (v != null && v.framesDecoded > 0 && System.nanoTime() - v.lastFrameNs < 1_000_000_000L) View.VISIBLE else View.GONE
-        if (v != null) crosshair.setOptics(ZOOMS[zoom].second, v.videoWidth, v.videoHeight)
+        if (v != null) {
+            crosshair.setOptics(ZOOMS[zoom].second, v.videoWidth, v.videoHeight)
+            lrfView.setOptics(ZOOMS[zoom].second, v.videoWidth, v.videoHeight)
+        }
         val source = if (gyroMode) "Gyro: $trackingText  ($poseRate poses/s)" else "ARCore: $trackingText  ($poseRate poses/s, camera ${cameraFps} fps)"
         statusText.text = "$source\n$linkText\n$videoText"
     }

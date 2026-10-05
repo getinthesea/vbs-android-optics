@@ -5,9 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.view.View
-import kotlin.math.atan
-import kotlin.math.floor
-import kotlin.math.tan
 
 /**
  * Binocular graticule drawn over the VBS video (the app draws the optics overlay, so VBS needs no .pbo):
@@ -15,8 +12,8 @@ import kotlin.math.tan
  * the centre. They run 60 mils left, right, up and down, each scale joined by a line, and the 20, 40 and 60 mil
  * ticks left and right are labelled above, in plain text a quarter as tall as a long tick.
  *
- * Ticks are placed by angle through the same perspective VBS renders with, so they stay true at every zoom:
- * a direction [angle] off-centre lands tan(angle) / tan(fov / 2) of the half-width from the centre.
+ * Ticks are placed by angle through the same perspective VBS renders with (see Graticule), so they stay true at
+ * every zoom: a direction [angle] off-centre lands tan(angle) / tan(fov / 2) of the half-width from the centre.
  */
 class CrosshairView(context: Context) : View(context) {
     private val line = Paint().apply {
@@ -68,29 +65,18 @@ class CrosshairView(context: Context) : View(context) {
     }
 
     private fun drawGraticule(canvas: Canvas, width: Int, height: Int) {
-        // The video fills its area keeping its shape (as VideoView draws it), cropped at two edges
-        val videoAspect = videoWidth.toFloat() / videoHeight
-        val viewAspect = width.toFloat() / height
-        val picW = if (viewAspect > videoAspect) width.toFloat() else height * videoAspect
-        val cx = width / 2f
-        val cy = height / 2f
-
-        // Pixels per unit of tangent: the same scale horizontally and vertically (square pixels)
-        val tanHalfFov = tan(Math.toRadians(fovDeg / 2.0))
-        val scale = (picW / 2) / tanHalfFov
-        val radPerMil = 2 * Math.PI / 6400
-        fun offsetPx(mils: Double) = (tan(mils * radPerMil) * scale).toFloat()
-
+        val g = Graticule.of(width, height, fovDeg, videoWidth, videoHeight) ?: return
+        val cx = g.cx
+        val cy = g.cy
+        fun offsetPx(mils: Double) = g.offset(mils)
         // Out to 60 mils, or the edge of the screen if that comes first (high zoom)
-        val edgeX = atan(width / 2.0 / scale) / radPerMil
-        val edgeY = atan(height / 2.0 / scale) / radPerMil
+        val edgeX = g.edgeX
+        val edgeY = g.edgeY
 
         // Lines joining the ticks: across from the outermost left tick to the outermost right, and from the top
         // tick to the bottom one
-        val outerX = offsetPx(floor(minOf(60.0, edgeX) / 10) * 10)
-        val outerY = offsetPx(floor(minOf(60.0, edgeY) / 10) * 10)
-        canvas.drawLine(cx - outerX, cy, cx + outerX, cy, line)
-        canvas.drawLine(cx, cy - outerY, cx, cy + outerY, line)
+        canvas.drawLine(cx - g.outerX, cy, cx + g.outerX, cy, line)
+        canvas.drawLine(cx, cy - g.outerY, cx, cy + g.outerY, line)
 
         // "20", "40" and "60" above those ticks either side, a quarter as tall as a long tick (10 mils), a little
         // clear of the tick's top

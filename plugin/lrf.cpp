@@ -20,6 +20,7 @@
 #include <vector>
 #include "lrf.h"
 #include "dagr.h"
+#include "overlay.h"
 #include "phone_link.h"
 
 namespace {
@@ -172,6 +173,7 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
     if (!execute || !active) {
         reset();
         phone_link_set_lrf("", "", false);
+        overlay_set_lrf("", "", false);
         return;
     }
     bool left = (buttons & 1) != 0, right = (buttons & 2) != 0;
@@ -253,4 +255,5 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
         timeout = -1;
     }
     phone_link_set_lrf(left_text, right_text, mark);
+    overlay_set_lrf(left_text, right_text, mark);
 }
