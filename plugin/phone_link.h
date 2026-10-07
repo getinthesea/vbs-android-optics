@@ -12,6 +12,7 @@ struct PhoneState {
     uint8_t  calibrate = 0;      // the phone's Calibrate counter
     float    fov_deg = 0;        // wanted horizontal field of view (0 = leave VBS's)
     uint8_t  buttons = 0;        // held now: bit 0 Bearing, bit 1 Range
+    bool     calibrating = false; // the phone is in calibration mode
     uint32_t ip = 0;             // phone's IPv4 (network order) on Wi-Fi, 0 over USB
     uint32_t packets = 0;
     double   age_ms = -1;        // since the last packet, -1 if none yet

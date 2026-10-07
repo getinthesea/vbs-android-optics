@@ -8,11 +8,16 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
-/** Draws ARCore's camera image full screen, so you can see what the tracker sees. GL thread only. */
+/**
+ * Draws ARCore's camera image, so you can see what the tracker sees: full screen, or (Cardboard, calibration mode)
+ * the middle of it once per eye, moved like the eyes' pictures (see Eyes). GL thread only.
+ */
 class CameraBackground {
     private val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
     private val quadCoords: FloatBuffer = floatBuffer(quad)
+    private val cropCoords: FloatBuffer = floatBuffer(FloatArray(8)) // the part of the view each eye shows
     private val texCoords: FloatBuffer = floatBuffer(FloatArray(8))
+    private var texCoordsEyes = 0
     private var program = 0
     var texture = 0; private set
 
@@ -41,13 +46,35 @@ class CameraBackground {
             """)
     }
 
-    fun draw(frame: Frame) {
-        if (frame.hasDisplayGeometryChanged()) {
+    fun draw(frame: Frame, viewWidth: Int = 0, viewHeight: Int = 0, eyes: Int = 1, eyeShift: Float = 0f) {
+        if (frame.hasDisplayGeometryChanged() || eyes != texCoordsEyes) {
+            // Each eye shows the middle 1/eyes of the full-screen image, at the same scale
+            val a = 1f / eyes
+            cropCoords.position(0)
+            cropCoords.put(floatArrayOf(-a, -1f, a, -1f, -a, 1f, a, 1f))
+            cropCoords.position(0)
             frame.transformCoordinates2d(
-                Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES, quadCoords,
+                Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES, cropCoords,
                 Coordinates2d.TEXTURE_NORMALIZED, texCoords)
+            texCoordsEyes = eyes
         }
         if (frame.timestamp == 0L) return
+        if (eyes < 2 || viewWidth <= 0) {
+            drawQuad()
+            return
+        }
+        val eyeWidth = viewWidth / eyes
+        GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+        for (eye in 0 until eyes) {
+            GLES20.glScissor(eye * eyeWidth, 0, eyeWidth, viewHeight)
+            GLES20.glViewport(eye * eyeWidth + Eyes.offset(eye, eyes, eyeShift).toInt(), 0, eyeWidth, viewHeight)
+            drawQuad()
+        }
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        GLES20.glViewport(0, 0, viewWidth, viewHeight)
+    }
+
+    private fun drawQuad() {
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture)

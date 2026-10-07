@@ -49,6 +49,7 @@ bool handle_packet(const PosePacket& p, const char* link, uint32_t ip, PoseAck& 
     latest.calibrate = p.calibrate;
     latest.fov_deg = p.fov_cdeg / 100.0f;
     latest.buttons = p.buttons;
+    latest.calibrating = (p.flags & 1) != 0;
 
     if (p.tracking) {
         Quat q{ p.qw, p.qx, p.qy, p.qz };

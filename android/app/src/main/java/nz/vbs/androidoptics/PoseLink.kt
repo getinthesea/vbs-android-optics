@@ -41,9 +41,10 @@ class PoseLink(val host: String) {
 
     /**
      * q is ARCore's rotationQuaternion: x, y, z, w; fovDeg is the wanted horizontal field of view;
-     * buttons are held now: bit 0 Bearing, bit 1 Range
+     * buttons are held now: bit 0 Bearing, bit 1 Range; calibrating: calibration mode (the IG shows a +)
      */
-    fun send(seq: Int, timestampNs: Long, q: FloatArray, tracking: Boolean, calibrate: Int, fovDeg: Float, buttons: Int) {
+    fun send(seq: Int, timestampNs: Long, q: FloatArray, tracking: Boolean, calibrate: Int, fovDeg: Float, buttons: Int,
+             calibrating: Boolean) {
         val buf = ByteBuffer.allocate(PACKET_SIZE).order(ByteOrder.LITTLE_ENDIAN)
         buf.put("VAO2".toByteArray(Charsets.US_ASCII))
         buf.putInt(seq)
@@ -53,6 +54,7 @@ class PoseLink(val host: String) {
         buf.put(calibrate.toByte())
         buf.putShort((fovDeg * 100).toInt().coerceIn(0, 65535).toShort())
         buf.put(buttons.toByte())
+        buf.put((if (calibrating) 1 else 0).toByte()) // flags: bit 0 calibrating
         // Keep only the newest poses if the network falls behind
         while (!queue.offer(buf.array())) queue.poll()
     }

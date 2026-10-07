@@ -9,15 +9,18 @@
 //   - sets the field of view the phone asks for (its zoom presets),
 //   - streams the VBS window to the phone,
 //   - works the phone's Bearing and Range buttons like the Vector's laser rangefinder (lrf.cpp),
-//   - draws the phone's graticule over VBS's window on the PC too (overlay.cpp).
+//   - draws the phone's graticule over VBS's window on the PC too (overlay.cpp),
+//   - while the phone is in calibration mode, sets vao_calibrating on every machine, for JFSim's IGs to show a +
+//     where the IG faces (its ig.sqf), for the phone's crosshair to be lined up on.
 // When the phone stops sending for a few seconds, the normal view is handed back. No SQF or .pbo is needed.
 // It also feeds the DAGR app (dagr/, installed in plugins64\vbs-android-optics) whether or not a phone is connected,
 // and starts it once per mission on the PC the phone is connected to.
 //
-//   pluginFunction ["VBSAndroidOptics", "status"]  -> ["one line report"]
+//   pluginFunction ["VBSAndroidOptics", "status"]  -> ["one line report", with the plugin's time per frame]
 //   pluginFunction ["VBSAndroidOptics", "dagr"]    -> ["what the DAGR app is being sent"]
 #include <winsock2.h>
 #include <windows.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -44,6 +47,61 @@ uint32_t steps = 0;
 const float DEFAULT_FOV_DEG = 60.0f;   // if the phone does not ask for one
 const double LOST_AFTER_MS = 3000;     // phone silent this long: hand the view back
 
+// Time the plugin spends on VBS's main thread each step (once per frame), by part, reported by "status": the
+// average and the worst single step over the last second, and steps a second (VBS's frame rate)
+double now_ms()
+{
+    static LARGE_INTEGER freq = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f; }();
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return c.QuadPart * 1000.0 / freq.QuadPart;
+}
+
+struct StepTiming {
+    double camera = 0, lrf = 0, dagr = 0;          // this step, ms
+    double sum_total = 0, sum_camera = 0, sum_lrf = 0, sum_dagr = 0, worst = 0;
+    int steps = 0;
+    double window_start = 0;
+    std::string text = "not measured yet";
+
+    template <typename F> void time(double& part, F work)
+    {
+        double t = now_ms();
+        work();
+        part += now_ms() - t;
+    }
+
+    void end_step(double total)
+    {
+        sum_total += total;
+        sum_camera += camera;
+        sum_lrf += lrf;
+        sum_dagr += dagr;
+        worst = (std::max)(worst, total);
+        steps++;
+        camera = lrf = dagr = 0;
+        double now = now_ms();
+        if (window_start == 0) window_start = now;
+        if (now - window_start < 1000) return;
+        double seconds = (now - window_start) / 1000;
+        char buf[256];
+        sprintf_s(buf, "plugin %.2f ms/frame (worst %.2f): camera %.2f, rangefinder %.2f, DAGR %.2f, rest %.2f | "
+            "%.0f frames/s",
+            sum_total / steps, worst, sum_camera / steps, sum_lrf / steps, sum_dagr / steps,
+            (sum_total - sum_camera - sum_lrf - sum_dagr) / steps, steps / seconds);
+        text = buf;
+        sum_total = sum_camera = sum_lrf = sum_dagr = worst = 0;
+        steps = 0;
+        window_start = now;
+    }
+} timing;
+
+// Ends the step's timing however OnSimulationStep returns
+struct StepClock {
+    double start = now_ms();
+    ~StepClock() { timing.end_step(now_ms() - start); }
+};
+
 void run(const char* sqf)
 {
     if (ExecuteCommand) ExecuteCommand(sqf, nullptr, 0);
@@ -60,6 +118,16 @@ const char* ENSURE_CAMERA_SQF =
     "showCinemaBorder false; "   // before cameraEffect, or VBS letterboxes the view
     "vao_cam cameraEffect [\"internal\", \"BACK\"]; "
     "}; ";
+
+// Tells every machine whether the phone here is calibrating (only when it changes)
+void broadcast_calibrating(bool on)
+{
+    static bool sent = false;
+    if (on == sent) return;
+    sent = on;
+    run(on ? "vao_calibrating = true; publicVariable \"vao_calibrating\";"
+           : "vao_calibrating = false; publicVariable \"vao_calibrating\";");
+}
 
 void release_view()
 {
@@ -78,6 +146,7 @@ VBS_PLUGIN_EXPORT void WINAPI RegisterCommandFnc(void* executeCommandFnc)
 VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
 {
     if (!ExecuteCommand) return;
+    StepClock clock;
     phone_link_start();
     streamer_start();
     dagr_start();
@@ -85,7 +154,7 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
 
     PhoneState phone = phone_link_read();
     bool connected = phone.age_ms >= 0 && phone.age_ms < LOST_AFTER_MS;
-    dagr_update((void*)ExecuteCommand, connected); // The PC showing the binos also shows the DAGR
+    timing.time(timing.dagr, [&] { dagr_update((void*)ExecuteCommand, connected); }); // the binos' PC shows the DAGR
 
     if (!connected) {
         if (active) {
@@ -93,8 +162,9 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
             active = false;
         }
         streamer_update(0);
-        lrf_step(ExecuteCommand, false, 0, 0, 0);
+        timing.time(timing.lrf, [&] { lrf_step(ExecuteCommand, false, 0, 0, 0); });
         overlay_update(false, 0);
+        broadcast_calibrating(false);
         return;
     }
 
@@ -141,9 +211,10 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         "};",
         ANCHOR_SQF, ENSURE_CAMERA_SQF, realign,
         tan_half_h, tan_half_v, phone.heading - heading_zero, phone.pitch, phone.roll);
-    run(cmd);
-    lrf_step(ExecuteCommand, true, phone.buttons, phone.heading - heading_zero, phone.pitch);
+    timing.time(timing.camera, [&] { run(cmd); });
+    timing.time(timing.lrf, [&] { lrf_step(ExecuteCommand, true, phone.buttons, phone.heading - heading_zero, phone.pitch); });
     overlay_update(true, fov_deg);
+    broadcast_calibrating(phone.calibrating); // JFSim's IGs show a + where they face
 
     streamer_update(phone.ip);
 }
@@ -154,10 +225,11 @@ VBS_PLUGIN_EXPORT const char* WINAPI PluginFunction(const char* input)
     std::string text;
     if (input && std::string(input) == "status") {
         PhoneState p = phone_link_read();
-        char buf[512];
-        sprintf_s(buf, "view=%s phone: link=%s packets=%u last=%.0fms tracking=%s h=%.1f p=%.1f r=%.1f fov=%.1f | video: %s",
+        char buf[1024];
+        sprintf_s(buf, "view=%s phone: link=%s packets=%u last=%.0fms tracking=%s h=%.1f p=%.1f r=%.1f fov=%.1f | %s | video: %s",
             active ? "phone" : "normal", p.link.empty() ? "none" : p.link.c_str(), p.packets, p.age_ms,
-            p.tracking ? "yes" : "no", p.heading - heading_zero, p.pitch, p.roll, fov_deg, streamer_status().c_str());
+            p.tracking ? "yes" : "no", p.heading - heading_zero, p.pitch, p.roll, fov_deg, timing.text.c_str(),
+            streamer_status().c_str());
         text = buf;
     }
     else if (input && std::string(input) == "dagr") {

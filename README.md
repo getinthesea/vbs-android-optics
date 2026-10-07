@@ -106,7 +106,19 @@ Close VBS and the DAGR app first, because they lock their files.
 android\install.ps1         # phone app -> the USB-connected phone
 ```
 
-Hold the phone like a camera: landscape, with the screen towards you. Face the way you want as forward and press **Calibrate**.
+Hold the phone like a camera: landscape, with the screen towards you.
+
+### Calibrating
+
+1. Press **Calibrate** (on screen, the Pico's Calibrate button, or a tap on the picture in Cardboard). The phone
+   shows its camera with a white + in the middle, and the Calibrate icon turns red.
+2. With JFSim, its IG screens show a red + on the horizon where the IG faces (JFSim's `ig.sqf`, from
+   `vao_calibrating`, which the plugin sets on every machine). Line the phone's + up on it. Without an IG, face the
+   way you want as forward.
+3. Press **Bearing** or **Range**: that calibrates, and the phone goes back to the VBS picture. The press is not
+   used as a rangefinder press.
+
+Press **Calibrate** again before Bearing or Range to go back without calibrating.
 
 For Google Cardboard, set **View: Cardboard** in Settings (remembered). The video, crosshair and rounded mask are shown once per eye, side by side. The same picture goes to both eyes, and there is no lens-distortion correction. With the phone in the viewer, pressing the viewer's button (any tap on the picture) calibrates.
 

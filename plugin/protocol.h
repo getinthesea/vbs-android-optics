@@ -32,7 +32,8 @@ struct PosePacket {             // 40 bytes
     uint8_t  calibrate;         // incremented each time Calibrate is pressed
     uint16_t fov_cdeg;          // wanted horizontal field of view, hundredths of a degree (0 = VBS default)
     uint8_t  buttons;           // held now: bit 0 Bearing, bit 1 Range (the Vector's left and right buttons)
-    uint8_t  reserved[3];
+    uint8_t  flags;             // bit 0: calibration mode (the IG shows a + where it faces)
+    uint8_t  reserved[2];
 };
 
 struct PoseAck {                // 32 bytes

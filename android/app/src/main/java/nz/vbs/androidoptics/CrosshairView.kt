@@ -52,15 +52,44 @@ class CrosshairView(context: Context) : View(context) {
             if (field != value) { field = value; invalidate() }
         }
 
+    /** Calibration mode: a plain crosshair over the phone's camera, to line up with the + on the IG screen */
+    var calibrating = false
+        set(value) {
+            if (field != value) { field = value; invalidate() }
+        }
+    private val crossEdge = Paint().apply {
+        color = Color.BLACK
+        isAntiAlias = true
+        strokeCap = Paint.Cap.SQUARE
+    }
+    private val crossLine = Paint().apply {
+        color = Color.WHITE
+        isAntiAlias = true
+        strokeCap = Paint.Cap.SQUARE
+    }
+
     override fun onDraw(canvas: Canvas) {
-        if (fovDeg <= 0f || videoWidth == 0 || videoHeight == 0) return
+        if (!calibrating && (fovDeg <= 0f || videoWidth == 0 || videoHeight == 0)) return
         val eyeWidth = width / eyes
         for (eye in 0 until eyes) {
             canvas.save()
             canvas.clipRect(eye * eyeWidth, 0, (eye + 1) * eyeWidth, height)
             canvas.translate(eye * eyeWidth + Eyes.offset(eye, eyes, eyeShift), 0f)
-            drawGraticule(canvas, eyeWidth, height)
+            if (calibrating) drawCross(canvas, eyeWidth, height) else drawGraticule(canvas, eyeWidth, height)
             canvas.restore()
+        }
+    }
+
+    /** White with a dark edge, so it shows against whatever the camera sees */
+    private fun drawCross(canvas: Canvas, width: Int, height: Int) {
+        val cx = width / 2f
+        val cy = height / 2f
+        val arm = height * 0.06f
+        crossLine.strokeWidth = maxOf(2f, height / 360f)
+        crossEdge.strokeWidth = crossLine.strokeWidth * 3
+        for (p in listOf(crossEdge, crossLine)) {
+            canvas.drawLine(cx - arm, cy, cx + arm, cy, p)
+            canvas.drawLine(cx, cy - arm, cx, cy + arm, p)
         }
     }
 

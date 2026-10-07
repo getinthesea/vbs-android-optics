@@ -8,7 +8,10 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
-/** Shows the decoded VBS video, filling the screen (or each half, for Cardboard) in its own shape. GL thread only. */
+/**
+ * Shows the decoded VBS video (or, in calibration mode, the phone's camera: PassthroughCamera), filling the screen
+ * (or each half, for Cardboard) in its own shape. GL thread only, but for setBufferSize.
+ */
 class VideoView {
     lateinit var surface: Surface; private set
     private lateinit var surfaceTexture: SurfaceTexture
@@ -17,6 +20,10 @@ class VideoView {
     @Volatile private var frameAvailable = false
     private var hasFrame = false
     private val texMatrix = FloatArray(16)
+    private val turned = FloatArray(16)
+    // (u, v) -> (1 - u, 1 - v): the picture turned half round (column-major)
+    private val halfTurn = floatArrayOf(-1f, 0f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f)
+    private var upsideDown = false
     private val quad: FloatBuffer = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         .apply { put(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)); position(0) }
 
@@ -47,6 +54,9 @@ class VideoView {
             """)
     }
 
+    /** The size of the frames a camera writes into [surface] */
+    fun setBufferSize(width: Int, height: Int) = surfaceTexture.setDefaultBufferSize(width, height)
+
     /** Latches the newest decoded frame, if any */
     fun update() {
         if (!frameAvailable) return
@@ -60,8 +70,10 @@ class VideoView {
      * Draws the frame side by side [eyes] times (1, or 2 for Cardboard), each filling its share of the view
      * and keeping its shape (the overflow is cropped, centred), moved sideways by [eyeShift] (see Eyes)
      */
-    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int, eyes: Int = 1, eyeShift: Float = 0f) {
+    fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int, eyes: Int = 1, eyeShift: Float = 0f,
+             upsideDown: Boolean = false) {
         if (!hasFrame || videoWidth == 0 || videoHeight == 0) return
+        this.upsideDown = upsideDown
         val eyeWidth = viewWidth / eyes
         GLES20.glEnable(GLES20.GL_SCISSOR_TEST) // Keeps each eye's cropped overflow out of the other
         for (eye in 0 until eyes) {
@@ -87,7 +99,9 @@ class VideoView {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture)
         GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "u_Texture"), 0)
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "u_TexMatrix"), 1, false, texMatrix, 0)
+        val matrix = if (upsideDown) turned.also { android.opengl.Matrix.multiplyMM(it, 0, texMatrix, 0, halfTurn, 0) }
+            else texMatrix
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "u_TexMatrix"), 1, false, matrix, 0)
         val position = GLES20.glGetAttribLocation(program, "a_Position")
         quad.position(0)
         GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 0, quad)

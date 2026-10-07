@@ -94,6 +94,13 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     @Volatile private var seq = 0
 
     @Volatile private var calibrate = 0
+    // Calibration mode: Calibrate shows the phone's camera with a crosshair (and asks the IG for a + where it faces);
+    // Bearing or Range then calibrates and goes back to the video; Calibrate again just goes back
+    @Volatile private var calibrating = false
+    private val lrfSwallowed = BooleanArray(2) // a press that calibrated: its release is not a rangefinder release
+    private lateinit var calibrateIcon: ImageButton
+    private val passthrough by lazy { PassthroughCamera(this) }
+    @Volatile private var cameraView: VideoView? = null // gyro tracking's camera, for calibration mode
     @Volatile private var lrfButtons = 0    // Held now: bit 0 Bearing, bit 1 Range (sent with every pose)
     private lateinit var lrfView: LrfView
     @Volatile private var trackingText = "starting"
@@ -117,7 +124,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             setRenderer(this@MainActivity)
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
             // In Cardboard the phone is out of reach: the viewer's button taps the screen, and that calibrates
-            setOnClickListener { if (cardboard) calibrate = (calibrate + 1) and 0xFF }
+            setOnClickListener { if (cardboard) toggleCalibrating() }
         }
 
         statusText = TextView(this).apply {
@@ -142,8 +149,9 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             setOnClickListener { applyHost() }
         }
         val calibrateButton = iconButton(R.drawable.ic_calibrate, "Calibrate").apply {
-            setOnClickListener { calibrate = (calibrate + 1) and 0xFF }
+            setOnClickListener { toggleCalibrating() }
         }
+        calibrateIcon = calibrateButton
         val zoomButton = Button(this).apply {
             text = "Zoom: ${ZOOMS[zoom].first}"
             setOnClickListener {
@@ -293,12 +301,37 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             }
         }
 
+    private fun toggleCalibrating() = setCalibrating(!calibrating)
+
+    /** UI thread: in or out of calibration mode */
+    private fun setCalibrating(on: Boolean) {
+        calibrating = on
+        crosshair.calibrating = on
+        lrfView.visibility = if (on) View.INVISIBLE else View.VISIBLE
+        calibrateIcon.setColorFilter(if (on) Color.rgb(255, 60, 40) else Color.TRANSPARENT,
+            android.graphics.PorterDuff.Mode.SRC_ATOP)
+        // Gyro tracking has no camera running: open one while calibrating (ARCore's is drawn otherwise)
+        val view = cameraView
+        if (on && gyroMode && view != null) {
+            if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) passthrough.open(view)
+            else requestPermissions(arrayOf(Manifest.permission.CAMERA), 0)
+        } else {
+            passthrough.close()
+        }
+    }
+
     // A rangefinder button going down and up, from the screen or from physical buttons (keys, below)
     private val lrfDownAt = LongArray(2)
     private val lrfPresses = IntArray(2)
 
     private fun lrfPress(bit: Int) {
         val i = bit - 1 // bit 1 Bearing, 2 Range
+        if (calibrating) {
+            calibrate = (calibrate + 1) and 0xFF // lined up: calibrate here, as Calibrate used to
+            lrfSwallowed[i] = true
+            setCalibrating(false)
+            return
+        }
         lrfPresses[i]++
         lrfDownAt[i] = System.currentTimeMillis()
         lrfButtons = lrfButtons or bit
@@ -306,6 +339,10 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
 
     private fun lrfRelease(bit: Int) {
         val i = bit - 1
+        if (lrfSwallowed[i]) {
+            lrfSwallowed[i] = false
+            return
+        }
         val press = lrfPresses[i]
         val wait = (MIN_HOLD_MS - (System.currentTimeMillis() - lrfDownAt[i])).coerceAtLeast(0)
         ui.postDelayed({ if (lrfPresses[i] == press) lrfButtons = lrfButtons and bit.inv() }, wait)
@@ -317,7 +354,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_F8) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) calibrate = (calibrate + 1) and 0xFF
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) toggleCalibrating()
             return true
         }
         val bit = when (event.keyCode) {
@@ -384,6 +421,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         super.onPause()
         glView.onPause()
         gyro.stop()
+        if (calibrating) setCalibrating(false)
         session?.pause()
         stopLink()
         videoStream?.close()
@@ -421,14 +459,14 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
 
     /** Gyro tracking: send the phone's orientation as the display-oriented pose ARCore would give */
     private fun sendGyroPose(timestampNs: Long, deviceToWorld: FloatArray) {
-        link?.send(seq++, timestampNs, displayToWorld(deviceToWorld), true, calibrate, ZOOMS[zoom].second, lrfButtons)
+        link?.send(seq++, timestampNs, displayToWorld(deviceToWorld), true, calibrate, ZOOMS[zoom].second, lrfButtons, calibrating)
         frames++
     }
 
     /** ARCore mode: send the gyro's orientation, corrected towards ARCore's */
     private fun sendFusedPose(timestampNs: Long, deviceToWorld: FloatArray) {
         val q = fusion.gyro(timestampNs, displayToWorld(deviceToWorld))
-        link?.send(seq++, timestampNs, q, true, calibrate, ZOOMS[zoom].second, lrfButtons)
+        link?.send(seq++, timestampNs, q, true, calibrate, ZOOMS[zoom].second, lrfButtons, calibrating)
         frames++
     }
 
@@ -558,7 +596,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
             else -> "Video: ${v.videoWidth}x${v.videoHeight}, ${v.framesDecoded} frames, ${v.framesDropped} dropped, " +
                 "${v.keyRequests} key requests, receive-to-screen %.1f ms".format(v.decodeMsAvg)
         }
-        crosshair.visibility = if (v != null && v.framesDecoded > 0 && System.nanoTime() - v.lastFrameNs < 1_000_000_000L) View.VISIBLE else View.GONE
+        crosshair.visibility = if (calibrating || (v != null && v.framesDecoded > 0 && System.nanoTime() - v.lastFrameNs < 1_000_000_000L)) View.VISIBLE else View.GONE
         if (v != null) {
             crosshair.setOptics(ZOOMS[zoom].second, v.videoWidth, v.videoHeight)
             lrfView.setOptics(ZOOMS[zoom].second, v.videoWidth, v.videoHeight)
@@ -606,6 +644,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         videoStream?.close()
         videoStream = null
         video = VideoView().apply { create() }
+        cameraView = VideoView().apply { create() }
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -638,11 +677,18 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         }
         val frame = if (s == null) null else try { s.update() } catch (e: Exception) { return }
 
-        // Show the VBS video while it is arriving, otherwise the camera
+        // Show the VBS video while it is arriving, otherwise the camera; the camera while calibrating
         val stream = videoStream
-        v?.update()
-        if (v != null && stream != null && System.nanoTime() - stream.lastFrameNs < 1_000_000_000L) {
-            v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, if (cardboard) 2 else 1, eyeShift)
+        v?.update() // keeps the decoder going while calibrating, so the video is straight back after
+        val eyes = if (cardboard) 2 else 1
+        val cam = cameraView
+        if (calibrating && frame != null) {
+            background.draw(frame, viewWidth, viewHeight, eyes, eyeShift)
+        } else if (calibrating && cam != null) {
+            cam.update()
+            cam.draw(viewWidth, viewHeight, passthrough.width, passthrough.height, eyes, eyeShift, passthrough.upsideDown(displayTurns))
+        } else if (v != null && stream != null && System.nanoTime() - stream.lastFrameNs < 1_000_000_000L) {
+            v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, eyes, eyeShift)
         } else if (frame != null) {
             background.draw(frame)
         }
@@ -658,7 +704,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         if (gyroFill) {
             fusion.arcore(frame.timestamp, q, tracking) // the gyro sends; this holds it true
         } else {
-            link?.send(seq++, frame.timestamp, q, tracking, calibrate, ZOOMS[zoom].second, lrfButtons)
+            link?.send(seq++, frame.timestamp, q, tracking, calibrate, ZOOMS[zoom].second, lrfButtons, calibrating)
             frames++
         }
     }
