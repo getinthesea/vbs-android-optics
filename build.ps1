@@ -15,7 +15,7 @@ $failed = @()
 if ($Parts -contains "plugin") {
     Write-Host "`n== plugin ($Config)" -ForegroundColor Cyan
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+    $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
     & $msbuild (Join-Path $root "plugin\VBSAndroidOptics.sln") /p:Configuration=$Config /p:Platform=x64 /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { $failed += "plugin" }
 }
