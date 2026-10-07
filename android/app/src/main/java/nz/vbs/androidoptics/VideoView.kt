@@ -68,10 +68,11 @@ class VideoView {
 
     /**
      * Draws the frame side by side [eyes] times (1, or 2 for Cardboard), each filling its share of the view
-     * and keeping its shape (the overflow is cropped, centred), moved sideways by [eyeShift] (see Eyes)
+     * and keeping its shape (the overflow is cropped, centred), moved sideways by [eyeShift] (see Eyes), and
+     * magnified [zoom] times about its middle (the calibration camera)
      */
     fun draw(viewWidth: Int, viewHeight: Int, videoWidth: Int, videoHeight: Int, eyes: Int = 1, eyeShift: Float = 0f,
-             upsideDown: Boolean = false) {
+             upsideDown: Boolean = false, zoom: Float = 1f) {
         if (!hasFrame || videoWidth == 0 || videoHeight == 0) return
         this.upsideDown = upsideDown
         val eyeWidth = viewWidth / eyes
@@ -79,22 +80,20 @@ class VideoView {
         for (eye in 0 until eyes) {
             val left = eye * eyeWidth
             GLES20.glScissor(left, 0, eyeWidth, viewHeight)
-            drawIn(left + Eyes.offset(eye, eyes, eyeShift).toInt(), eyeWidth, viewHeight, videoWidth, videoHeight)
+            drawIn(left + Eyes.offset(eye, eyes, eyeShift).toInt(), eyeWidth, viewHeight, videoWidth, videoHeight, zoom)
         }
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         GLES20.glViewport(0, 0, viewWidth, viewHeight)
     }
 
-    private fun drawIn(left: Int, regionWidth: Int, regionHeight: Int, videoWidth: Int, videoHeight: Int) {
+    private fun drawIn(left: Int, regionWidth: Int, regionHeight: Int, videoWidth: Int, videoHeight: Int, zoom: Float) {
         val videoAspect = videoWidth.toFloat() / videoHeight
         val regionAspect = regionWidth.toFloat() / regionHeight
-        if (regionAspect > videoAspect) {
-            val h = (regionWidth / videoAspect).toInt()
-            GLES20.glViewport(left, (regionHeight - h) / 2, regionWidth, h)
-        } else {
-            val w = (regionHeight * videoAspect).toInt()
-            GLES20.glViewport(left + (regionWidth - w) / 2, 0, w, regionHeight)
-        }
+        // Fill the region keeping the frame's shape, then magnify about the middle; the scissor crops the rest
+        val fillW = if (regionAspect > videoAspect) regionWidth.toFloat() else regionHeight * videoAspect
+        val w = (fillW * zoom).toInt()
+        val h = (fillW / videoAspect * zoom).toInt()
+        GLES20.glViewport(left + (regionWidth - w) / 2, (regionHeight - h) / 2, w, h)
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture)

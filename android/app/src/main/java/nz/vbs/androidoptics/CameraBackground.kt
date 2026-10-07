@@ -18,6 +18,7 @@ class CameraBackground {
     private val cropCoords: FloatBuffer = floatBuffer(FloatArray(8)) // the part of the view each eye shows
     private val texCoords: FloatBuffer = floatBuffer(FloatArray(8))
     private var texCoordsEyes = 0
+    private var texCoordsZoom = 1f
     private var program = 0
     var texture = 0; private set
 
@@ -46,17 +47,20 @@ class CameraBackground {
             """)
     }
 
-    fun draw(frame: Frame, viewWidth: Int = 0, viewHeight: Int = 0, eyes: Int = 1, eyeShift: Float = 0f) {
-        if (frame.hasDisplayGeometryChanged() || eyes != texCoordsEyes) {
-            // Each eye shows the middle 1/eyes of the full-screen image, at the same scale
-            val a = 1f / eyes
+    /** [zoom] magnifies the middle of the picture (the calibration camera) */
+    fun draw(frame: Frame, viewWidth: Int = 0, viewHeight: Int = 0, eyes: Int = 1, eyeShift: Float = 0f, zoom: Float = 1f) {
+        if (frame.hasDisplayGeometryChanged() || eyes != texCoordsEyes || zoom != texCoordsZoom) {
+            // Each eye shows the middle 1/eyes of the full-screen image, at the same scale, magnified [zoom] times
+            val a = 1f / eyes / zoom
+            val b = 1f / zoom
             cropCoords.position(0)
-            cropCoords.put(floatArrayOf(-a, -1f, a, -1f, -a, 1f, a, 1f))
+            cropCoords.put(floatArrayOf(-a, -b, a, -b, -a, b, a, b))
             cropCoords.position(0)
             frame.transformCoordinates2d(
                 Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES, cropCoords,
                 Coordinates2d.TEXTURE_NORMALIZED, texCoords)
             texCoordsEyes = eyes
+            texCoordsZoom = zoom
         }
         if (frame.timestamp == 0L) return
         if (eyes < 2 || viewWidth <= 0) {

@@ -79,7 +79,8 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
     // Zoom presets: name and horizontal field of view in degrees. The plugin sets VBS's view to match.
     // 1x to 5x in steps of 0.5x. Magnification divides the tangent of the half-angle: 1x is 60 degrees, 2x 32.2,
     // 3x 21.8, 4x 16.4, 5x 13.2.
-    private val ZOOMS = (2..10).map { it / 2.0 }.map { m ->
+    private val MAGNIFICATIONS = (2..10).map { it / 2.0 }
+    private val ZOOMS = MAGNIFICATIONS.map { m ->
         val name = if (m % 1.0 == 0.0) "${m.toInt()}x" else "${m}x"
         name to Math.toDegrees(2 * kotlin.math.atan(kotlin.math.tan(Math.toRadians(30.0)) / m)).toFloat()
     }
@@ -683,10 +684,11 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         val eyes = if (cardboard) 2 else 1
         val cam = cameraView
         if (calibrating && frame != null) {
-            background.draw(frame, viewWidth, viewHeight, eyes, eyeShift)
+            background.draw(frame, viewWidth, viewHeight, eyes, eyeShift, MAGNIFICATIONS[zoom].toFloat())
         } else if (calibrating && cam != null) {
             cam.update()
-            cam.draw(viewWidth, viewHeight, passthrough.width, passthrough.height, eyes, eyeShift, passthrough.upsideDown(displayTurns))
+            cam.draw(viewWidth, viewHeight, passthrough.width, passthrough.height, eyes, eyeShift,
+                passthrough.upsideDown(displayTurns), MAGNIFICATIONS[zoom].toFloat()) // magnified like the binos
         } else if (v != null && stream != null && System.nanoTime() - stream.lastFrameNs < 1_000_000_000L) {
             v.draw(viewWidth, viewHeight, stream.videoWidth, stream.videoHeight, eyes, eyeShift)
         } else if (frame != null) {
