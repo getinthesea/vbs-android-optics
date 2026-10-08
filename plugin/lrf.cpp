@@ -37,6 +37,7 @@ bool update_aos = false, left_release = false;
 double timeout = -1;                    // time of the last press (-1: nothing to clear)
 double double_left = -1e9, double_right = -1e9;
 std::string left_text, right_text;
+std::string grid_text; // the lased grid, shown after a lase with both buttons
 bool mark = false;
 
 struct Lase {
@@ -163,6 +164,7 @@ void reset()
     double_left = double_right = -1e9;
     left_text.clear();
     right_text.clear();
+    grid_text.clear();
     mark = false;
 }
 
@@ -172,7 +174,7 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
 {
     if (!execute || !active) {
         reset();
-        phone_link_set_lrf("", "", false);
+        phone_link_set_lrf("", "", false, "");
         overlay_set_lrf("", "", false);
         return;
     }
@@ -192,12 +194,14 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
         Lase l = lase(execute, heading_delta, pitch);
         left_text = std::to_string(bearing_mils(l));
         right_text = range_text(l);
+        grid_text = has_range(l) ? l.mgrs : "";
         double_down = false;
         timeout = now;
         publish(execute, l, true, pitch);
     }
     if (left && !disable_input) { // LEFT PRESS (every step while held)
         left_down = true;
+        grid_text.clear();
         mark = true;
         Lase l = lase(execute, heading_delta, pitch);
         left_text = std::to_string(bearing_mils(l));
@@ -232,6 +236,7 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
     }
     if (!right && right_down && !disable_input && !disable_right) { // RIGHT RELEASE
         right_down = false;
+        grid_text.clear();
         Lase l = lase(execute, heading_delta, pitch);
         if (now - double_right >= DOUBLE_CLICK_S) { // single: range
             left_text.clear();
@@ -249,11 +254,12 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
     if (timeout >= 0 && now - timeout >= CLEAR_AFTER_S) { // CLEAR DISPLAY
         left_text.clear();
         right_text.clear();
+        grid_text.clear();
         mark = false;
         disable_input = false;
         disable_right = false;
         timeout = -1;
     }
-    phone_link_set_lrf(left_text, right_text, mark);
+    phone_link_set_lrf(left_text, right_text, mark, grid_text);
     overlay_set_lrf(left_text, right_text, mark);
 }

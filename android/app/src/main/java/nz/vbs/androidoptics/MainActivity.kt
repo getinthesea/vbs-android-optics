@@ -281,7 +281,7 @@ class MainActivity : Activity(), GLSurfaceView.Renderer {
         ui.post(object : Runnable {
             override fun run() {
                 val l = link
-                if (l == null) lrfView.show("", "", false) else lrfView.show(l.lrfLeft, l.lrfRight, l.lrfMark)
+                if (l == null) lrfView.show("", "", false, "") else lrfView.show(l.lrfLeft, l.lrfRight, l.lrfMark, l.lrfGrid)
                 ui.postDelayed(this, 30)
             }
         })

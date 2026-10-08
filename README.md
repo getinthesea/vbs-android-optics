@@ -35,7 +35,7 @@ The **Bearing** and **Range** buttons in the phone's bottom corners work like th
 | Bearing, again within 3 s | Bearing, and the vertical angle in mils. Locked until the display clears |
 | Range | Range in metres. After Bearing, Range is ignored until the display clears |
 | Range, again within 3 s | Range, and the difference in altitude (target minus observer, m). Locked until it clears |
-| Both together | Bearing and range. JFSim's DAGR and this project's DAGR show the target (LRF TGT MODE) |
+| Both together | Bearing and range, and the lased grid at the bottom of the phone's screen. JFSim's DAGR and this project's DAGR show the target (LRF TGT MODE) |
 
 The display clears 4 s after the last press. Ranges beyond 8000 m or under 5 m read `- - - -`. The range is to
 the ground at the centre of the view; buildings and trees are not seen, as with `vector.sqf`. Each lase is

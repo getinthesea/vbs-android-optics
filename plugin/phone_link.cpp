@@ -24,7 +24,7 @@ bool      filt_initialized = false;
 PhoneState latest;
 ULONGLONG last_packet_ms = 0;
 ULONGLONG last_tracking_ms = 0;
-char      lrf_left[8] = {}, lrf_right[8] = {};
+char      lrf_left[8] = {}, lrf_right[8] = {}, lrf_grid[16] = {};
 bool      lrf_mark = false;
 uint32_t  lrf_version = 0;       // bumped when the display changes
 
@@ -67,12 +67,13 @@ bool handle_packet(const PosePacket& p, const char* link, uint32_t ip, PoseAck& 
     }
 
     memset(&ack, 0, sizeof(ack));
-    memcpy(ack.magic, "VAA2", 4);
+    memcpy(ack.magic, "VAA3", 4);
     ack.seq = p.seq;
     ack.received = latest.packets;
     memcpy(ack.lrf_left, lrf_left, sizeof(lrf_left));
     memcpy(ack.lrf_right, lrf_right, sizeof(lrf_right));
     ack.lrf_mark = lrf_mark ? 1 : 0;
+    memcpy(ack.lrf_grid, lrf_grid, sizeof(lrf_grid));
     send_now = sent_version != lrf_version;
     sent_version = lrf_version;
     return true;
@@ -191,15 +192,17 @@ void phone_link_stop()
     if (tcp_thread.joinable()) tcp_thread.detach();
 }
 
-void phone_link_set_lrf(const std::string& left, const std::string& right, bool mark)
+void phone_link_set_lrf(const std::string& left, const std::string& right, bool mark, const std::string& grid)
 {
     std::lock_guard<std::mutex> lock(state_mutex);
-    char l[8] = {}, r[8] = {};
+    char l[8] = {}, r[8] = {}, g[16] = {};
     strncpy_s(l, left.c_str(), _TRUNCATE);
     strncpy_s(r, right.c_str(), _TRUNCATE);
-    if (memcmp(l, lrf_left, 8) == 0 && memcmp(r, lrf_right, 8) == 0 && mark == lrf_mark) return;
+    strncpy_s(g, grid.c_str(), _TRUNCATE);
+    if (memcmp(l, lrf_left, 8) == 0 && memcmp(r, lrf_right, 8) == 0 && memcmp(g, lrf_grid, 16) == 0 && mark == lrf_mark) return;
     memcpy(lrf_left, l, 8);
     memcpy(lrf_right, r, 8);
+    memcpy(lrf_grid, g, 16);
     lrf_mark = mark;
     lrf_version++;
 }

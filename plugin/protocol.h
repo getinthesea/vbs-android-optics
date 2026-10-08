@@ -36,14 +36,15 @@ struct PosePacket {             // 40 bytes
     uint8_t  reserved[2];
 };
 
-struct PoseAck {                // 32 bytes
-    char     magic[4];          // "VAA2"
+struct PoseAck {                // 48 bytes
+    char     magic[4];          // "VAA3"
     uint32_t seq;               // last seq received
     uint32_t received;          // packets received since the plugin loaded
     char     lrf_left[8];       // laser rangefinder display, as the Vector shows it: left and right readouts,
     char     lrf_right[8];      // zero-terminated ("" = blank)
     uint8_t  lrf_mark;          // 1 = the aiming mark ("o") is showing
     uint8_t  reserved[3];
+    char     lrf_grid[16];      // the lased grid after both buttons (MGRS, e.g. "60HUB9461034250"), "" otherwise
 };
 
 struct VideoPacketHeader {      // 16 bytes, then payload_len bytes of H.264 (Annex-B)
@@ -72,7 +73,7 @@ struct DiscoverReply {          // 36 bytes, PC -> phone
 #pragma pack(pop)
 
 static_assert(sizeof(PosePacket) == 40, "PosePacket layout");
-static_assert(sizeof(PoseAck) == 32, "PoseAck layout");
+static_assert(sizeof(PoseAck) == 48, "PoseAck layout");
 static_assert(sizeof(VideoPacketHeader) == 16, "VideoPacketHeader layout");
 static_assert(sizeof(KeyRequest) == 8, "KeyRequest layout");
 static_assert(sizeof(DiscoverRequest) == 8, "DiscoverRequest layout");

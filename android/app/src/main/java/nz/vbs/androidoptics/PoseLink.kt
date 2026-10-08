@@ -23,7 +23,7 @@ class PoseLink(val host: String) {
         const val PORT = 47830
         const val USB = "usb"
         private const val PACKET_SIZE = 40
-        private const val ACK_SIZE = 32
+        private const val ACK_SIZE = 48
     }
 
     val sent = AtomicInteger()
@@ -34,6 +34,7 @@ class PoseLink(val host: String) {
     @Volatile var lrfLeft = ""; private set
     @Volatile var lrfRight = ""; private set
     @Volatile var lrfMark = false; private set
+    @Volatile var lrfGrid = ""; private set // the lased grid after both buttons (MGRS), "" otherwise
 
     private val queue = ArrayBlockingQueue<ByteArray>(4)
     @Volatile private var running = true
@@ -65,12 +66,13 @@ class PoseLink(val host: String) {
     }
 
     private fun onAck(b: ByteArray) {
-        if (String(b, 0, 4, Charsets.US_ASCII) != "VAA2") return
+        if (String(b, 0, 4, Charsets.US_ASCII) != "VAA3") return
         pcReceived = ByteBuffer.wrap(b, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
         lastAckMs = System.currentTimeMillis()
         lrfLeft = String(b, 12, 8, Charsets.US_ASCII).substringBefore('\u0000')
         lrfRight = String(b, 20, 8, Charsets.US_ASCII).substringBefore('\u0000')
         lrfMark = b[28].toInt() != 0
+        lrfGrid = String(b, 32, 16, Charsets.US_ASCII).substringBefore(0.toChar())
     }
 
     private fun runUdp() {

@@ -23,4 +23,4 @@ void phone_link_start();         // safe to call every step; starts the receiver
 void phone_link_stop();
 PhoneState phone_link_read();
 // What the phone's rangefinder display shows (sent back in the acks, straight away when it changes)
-void phone_link_set_lrf(const std::string& left, const std::string& right, bool mark);
+void phone_link_set_lrf(const std::string& left, const std::string& right, bool mark, const std::string& grid);
