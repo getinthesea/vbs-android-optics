@@ -16,3 +16,7 @@ void dagr_set_target(const std::string& mgrs, long dn_mils, long dist_m, long di
 // A Bearing or Range press on its own: the app leaves target mode and shows the observer's grid again
 void dagr_clear_target();
 std::string dagr_status();
+// The DAGR app's menu, sent with its requests ("VDG1m<mode>g<0|1>"): the binos' view mode (0 day, 1 night vision,
+// 2 thermal black hot, 3 thermal white hot, 4 thermal fusion) and whether the phone shows the lased grid
+int dagr_view_mode();
+bool dagr_show_grid();

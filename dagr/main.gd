@@ -16,6 +16,15 @@ var poll_timer := 0.0
 var last_target_id := -1        # Of the plugin's last lase (-1: not seen a reading yet)
 var target := {}                # The lase being shown ({} = normal display)
 var target_observer := ""       # The observer's grid when it was lased
+# The ☰ menu (Escape): the binos' view mode and the phone's lased grid, sent to the plugin with each request
+# ("VDG1m<mode>g<0|1>") and remembered here
+const VIEW_MODES := ["Day Optics", "Night Vision", "Thermal Black Hot", "Thermal White Hot", "Thermal Fusion"]
+const GRID_ITEM := 10
+const SETTINGS := "user://dagr.cfg"
+var view_mode := 0
+var show_grid := true
+var menu_button: Button
+var menu: PopupMenu
 
 @onready var mgrs_label: Label = $MGRS
 @onready var date_label: Label = $Date
@@ -32,6 +41,8 @@ var target_observer := ""       # The observer's grid when it was lased
 func _ready() -> void:
 	udp.set_broadcast_enabled(true)
 	udp.bind(0)
+	load_settings()
+	build_menu()
 	show_no_reading()
 	come_to_front()
 
@@ -70,14 +81,84 @@ func _process(delta: float) -> void:
 		show_no_reading()
 
 
-## Escape switches between fullscreen and a window
+## Escape leaves fullscreen and shows the ☰ menu button; Escape again hides it and goes back to fullscreen
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		var window := get_window()
-		if window.mode == Window.MODE_FULLSCREEN or window.mode == Window.MODE_EXCLUSIVE_FULLSCREEN:
-			window.mode = Window.MODE_WINDOWED
-		else:
-			window.mode = Window.MODE_FULLSCREEN
+		set_menu_mode(not menu_button.visible)
+
+
+func set_menu_mode(on: bool) -> void:
+	menu_button.visible = on
+	if not on:
+		menu.hide()
+	get_window().mode = Window.MODE_WINDOWED if on else Window.MODE_FULLSCREEN
+
+
+## The ☰ button (top right, three bars) and its menu, in the DAGR's own font
+func build_menu() -> void:
+	var font: Font = load("res://Jersey_10/Jersey10-Regular.ttf")
+	menu_button = Button.new()
+	menu_button.anchor_left = 1.0
+	menu_button.anchor_right = 1.0
+	menu_button.offset_left = -100
+	menu_button.offset_right = -24
+	menu_button.offset_top = 24
+	menu_button.offset_bottom = 88
+	menu_button.visible = false
+	menu_button.focus_mode = Control.FOCUS_NONE
+	for i in 3:
+		var bar := ColorRect.new()
+		bar.color = Color(0.82, 0.8, 0.62)
+		bar.position = Vector2(16, 16 + i * 14)
+		bar.size = Vector2(44, 6)
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		menu_button.add_child(bar)
+	add_child(menu_button)
+
+	menu = PopupMenu.new()
+	menu.add_theme_font_override("font", font)
+	menu.add_theme_font_size_override("font_size", 40)
+	for i in VIEW_MODES.size():
+		menu.add_radio_check_item(VIEW_MODES[i], i)
+	menu.add_separator()
+	menu.add_check_item("Show LRF Grid Reference", GRID_ITEM)
+	menu.hide_on_checkable_item_selection = false
+	add_child(menu)
+	update_menu_checks()
+
+	menu_button.pressed.connect(func():
+		menu.reset_size()
+		var right := menu_button.global_position.x + menu_button.size.x
+		menu.position = Vector2i(int(right) - menu.size.x, int(menu_button.global_position.y + menu_button.size.y + 8))
+		menu.popup())
+	menu.id_pressed.connect(func(id: int):
+		if id == GRID_ITEM:
+			show_grid = not show_grid
+		elif id >= 0 and id < VIEW_MODES.size():
+			view_mode = id
+		update_menu_checks()
+		save_settings()
+		poll()) # tell the plugin straight away
+
+
+func update_menu_checks() -> void:
+	for i in VIEW_MODES.size():
+		menu.set_item_checked(menu.get_item_index(i), i == view_mode)
+	menu.set_item_checked(menu.get_item_index(GRID_ITEM), show_grid)
+
+
+func load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS) == OK:
+		view_mode = clampi(int(cfg.get_value("binos", "view_mode", 0)), 0, VIEW_MODES.size() - 1)
+		show_grid = bool(cfg.get_value("binos", "show_grid", true))
+
+
+func save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("binos", "view_mode", view_mode)
+	cfg.set_value("binos", "show_grid", show_grid)
+	cfg.save(SETTINGS)
 
 
 func connected() -> bool:
@@ -91,8 +172,12 @@ func poll() -> void:
 	elif vbs_address == "":
 		targets.append("255.255.255.255")
 	for address in targets:
+		# The menu's choices go only to the VBS this DAGR is locked onto, never in a broadcast
+		var request := REQUEST
+		if address == vbs_address:
+			request += "m%dg%d" % [view_mode, 1 if show_grid else 0]
 		udp.set_dest_address(address, PORT)
-		udp.put_packet(REQUEST.to_ascii_buffer())
+		udp.put_packet(request.to_ascii_buffer())
 
 
 func show_reading(reading: Dictionary) -> void:

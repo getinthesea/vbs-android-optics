@@ -260,6 +260,6 @@ void lrf_step(ExecuteCommandType execute, bool active, uint8_t buttons, double h
         disable_right = false;
         timeout = -1;
     }
-    phone_link_set_lrf(left_text, right_text, mark, grid_text);
+    phone_link_set_lrf(left_text, right_text, mark, dagr_show_grid() ? grid_text : ""); // the DAGR menu can hide it
     overlay_set_lrf(left_text, right_text, mark);
 }

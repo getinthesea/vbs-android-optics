@@ -79,6 +79,11 @@ it keeps it closed until the next mission. It can also be started by hand on any
 | Battery Locations | The first 5 of the units `G1`-`G9` that exist, as 6-figure grids. With none, the heading is hidden too |
 | Compass MV | `getDeclination`, in mils |
 
+**Escape** leaves fullscreen and shows a ☰ menu at the top right; Escape again hides it and goes back to
+fullscreen. The menu sets the binos' view: **Day Optics**, **Night Vision** (JFSim's NVG settings), **Thermal
+Black Hot**, **Thermal White Hot** or **Thermal Fusion**; and **Show LRF Grid Reference** turns the lased grid on
+the phone on or off. The DAGR remembers them and sends them with its requests.
+
 The figures match JFSim's own DAGR (`dagr.sqf`). With no VBS or no mission running, the app shows dashes.
 After a lase with both rangefinder buttons it shows the target, as JFSim's DAGR does (grid, Dn, Dist and DifAlt,
 observer minus target), until the observer moves.

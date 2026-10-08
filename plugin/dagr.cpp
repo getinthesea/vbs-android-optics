@@ -25,6 +25,8 @@ std::mutex state_mutex;
 std::string state_json = "{\"ok\":false}"; // Guarded by state_mutex
 std::string last_raw;                      // Guarded by state_mutex: the SQF's last result, for "status"
 std::atomic<unsigned> requests{ 0 };
+std::atomic<int> view_mode{ 0 };       // from the app's menu (dagr.h)
+std::atomic<bool> show_grid{ true };
 std::string launch_status = "not yet";     // VBS thread only
 std::string target_json;                   // VBS thread only: the last lase with both buttons ("" = none)
 unsigned target_id = 0;
@@ -95,7 +97,8 @@ std::string to_json(std::string raw)
     return json + "]}";
 }
 
-// Answers the app: any "VDG1" packet gets the latest reading
+// Answers the app: any "VDG1" packet gets the latest reading. "VDG1m<mode>g<0|1>" also sets the menu's choices
+// (the app sends them only to the VBS it has locked onto, not in its broadcasts)
 void serve()
 {
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -115,13 +118,20 @@ void serve()
         sockaddr_in from{};
         int from_len = sizeof(from);
         int n = recvfrom(s, buffer, sizeof(buffer), 0, (sockaddr*)&from, &from_len);
-        if (n != 4 || memcmp(buffer, "VDG1", 4) != 0) continue;
+        if (n < 4 || memcmp(buffer, "VDG1", 4) != 0) continue;
+        if (n == 8 && buffer[4] == 'm' && buffer[5] >= '0' && buffer[5] <= '4' && buffer[6] == 'g') {
+            view_mode = buffer[5] - '0';
+            show_grid = buffer[7] != '0';
+        }
         requests++;
         std::string reply;
         {
             std::lock_guard<std::mutex> lock(state_mutex);
             reply = state_json;
         }
+        // What the plugin is using, so the app's menu shows it
+        reply.insert(reply.size() - 1, ",\"view_mode\":" + std::to_string(view_mode.load()) +
+            ",\"show_grid\":" + (show_grid ? "true" : "false"));
         sendto(s, reply.c_str(), (int)reply.size(), 0, (sockaddr*)&from, from_len);
     }
     closesocket(s);
@@ -226,6 +236,16 @@ void dagr_stop()
     // Called from DllMain: joining threads there can deadlock, so just ask the server to finish (it times out in 250 ms)
     running = false;
     if (server.joinable()) server.detach();
+}
+
+int dagr_view_mode()
+{
+    return view_mode;
+}
+
+bool dagr_show_grid()
+{
+    return show_grid;
 }
 
 std::string dagr_status()

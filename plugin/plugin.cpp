@@ -10,6 +10,8 @@
 //   - streams the VBS window to the phone,
 //   - works the phone's Bearing and Range buttons like the Vector's laser rangefinder (lrf.cpp),
 //   - draws the phone's graticule over VBS's window on the PC too (overlay.cpp),
+//   - sets the binos' view mode from the DAGR app's menu: day, night vision (JFSim's NVG settings), thermal black
+//     or white hot, or thermal fusion,
 //   - while the phone is in calibration mode, sets vao_calibrating on every machine, for JFSim's IGs to show a +
 //     where the IG faces (its ig.sqf), for the phone's crosshair to be lined up on.
 // When the phone stops sending for a few seconds, the normal view is handed back. No SQF or .pbo is needed.
@@ -129,9 +131,24 @@ void broadcast_calibrating(bool on)
            : "vao_calibrating = false; publicVariable \"vao_calibrating\";");
 }
 
+// The binos' view mode, by the DAGR menu's number (dagr.h). Night vision uses JFSim's NVG settings (init.sqf's
+// func_set_nvg: its noise and contrast, white phosphor), as JFSim's own NVG optic does
+const char* VIEW_MODE_SQF[] = {
+    "setTIMode -1; setCamSensorOverride [true, \"visible\"];",
+    "setSensorNoise [\"nvg\", true, (if (isNil \"global_nvg_noise\") then { 0.01 } else { global_nvg_noise }), 0, 3, 1.1, 1.1, true]; "
+    "setNVGContrast (if (isNil \"global_nvg_contrast\") then { 0.01 } else { global_nvg_contrast }); setNVGMode 1; "
+    "setTIMode -1; setCamSensorOverride [true, \"nightvision\"];",
+    "setTIMode 1; setCamSensorOverride [true, \"thermal\"];",
+    "setTIMode 0; setCamSensorOverride [true, \"thermal\"];",
+    "setTIMode -1; setCamSensorOverride [true, \"nvgti\"];",
+};
+int applied_view_mode = -1; // -1: VBS's own (not ours)
+
 void release_view()
 {
-    run("setCamFrustumOffsets [false]; setCamFrustum [false]; "
+    applied_view_mode = -1;
+    run("setCamSensorOverride [false, \"\"]; setTIMode -1; "
+        "setCamFrustumOffsets [false]; setCamFrustum [false]; "
         "if (!isNil \"vao_cam\") then { vao_cam cameraEffect [\"terminate\", \"BACK\"]; camDestroy vao_cam; vao_cam = nil; }; "
         "showHUD true; if (!isNil \"vao_ui_was_hidden\") then { hideUI vao_ui_was_hidden; } else { hideUI false; };");
 }
@@ -212,6 +229,12 @@ VBS_PLUGIN_EXPORT void WINAPI OnSimulationStep(float)
         ANCHOR_SQF, ENSURE_CAMERA_SQF, realign,
         tan_half_h, tan_half_v, phone.heading - heading_zero, phone.pitch, phone.roll);
     timing.time(timing.camera, [&] { run(cmd); });
+    // The DAGR menu's view mode: when it changes, and every few seconds in case a mission restart reset it
+    int mode = dagr_view_mode();
+    if (mode >= 0 && mode < 5 && (mode != applied_view_mode || steps % 300 == 0)) {
+        run(VIEW_MODE_SQF[mode]);
+        applied_view_mode = mode;
+    }
     timing.time(timing.lrf, [&] { lrf_step(ExecuteCommand, true, phone.buttons, phone.heading - heading_zero, phone.pitch); });
     overlay_update(true, fov_deg);
     broadcast_calibrating(phone.calibrating); // JFSim's IGs show a + where they face
